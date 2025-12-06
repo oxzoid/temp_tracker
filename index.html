@@ -202,20 +202,25 @@
 
       // Collect ALL untracked activities into ONE continuous red bar
       // But keep track of individual activities for the popup
+      // Manual entries (copied from untracked) are separate and show as colored blocks
       const processActivities = (acts) => {
         const sorted = acts.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
         const result = [];
         
         // Check if activity is classified (has a valid type - productive, unproductive, OR neutral)
-        // neutral = gray classified block, untracked = no type at all
         const isClassified = (a) => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral';
         
-        // Check if it's a real screen activity (not manual entry)
-        const isScreenActivity = (a) => a.source === 'auto-tracked' || (a.windowTitle && a.windowTitle !== 'Manual Entry');
+        // Check if it's a real screen activity (auto-tracked, not manual entry)
+        const isScreenActivity = (a) => a.source === 'auto-tracked' && a.windowTitle !== 'Manual Entry';
         
-        // Collect untracked SCREEN activities only (not manual entries, not classified)
+        // Check if it's a manual entry (created by user via copy or drag)
+        const isManualEntry = (a) => a.source === 'manual' || a.windowTitle === 'Manual Entry';
+        
+        // Collect untracked SCREEN activities only (auto-tracked without classification)
         const allUntracked = sorted.filter(a => !isClassified(a) && isScreenActivity(a));
-        const allClassified = sorted.filter(a => isClassified(a));
+        
+        // Collect all classified activities AND manual entries (these show as blocks)
+        const allBlocks = sorted.filter(a => isClassified(a) || isManualEntry(a));
         
         // If there are untracked screen activities, create ONE merged block
         if (allUntracked.length > 0) {
@@ -226,7 +231,7 @@
           result.push({
             id: 'merged_untracked_block',
             name: 'Untracked',
-            type: 'untracked', // Use 'untracked' not 'unclassified'
+            type: 'untracked',
             startTime: firstUntracked.startTime,
             endTime: lastUntracked.endTime,
             duration: totalDuration,
@@ -235,8 +240,8 @@
           });
         }
         
-        // Add all classified activities (includes neutral as gray blocks)
-        result.push(...allClassified);
+        // Add all classified activities and manual entries as separate blocks
+        result.push(...allBlocks);
         
         return result;
       };
@@ -520,21 +525,23 @@
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Create a new tracked activity
+                        // Create a NEW separate time entry (does not modify untracked data)
+                        // This is a manual entry, so it won't affect the red untracked bar
                         const newActivity = {
                           id: Date.now(),
-                          name: selectedActivity.name || 'Time Entry',
+                          name: 'Time Entry',
                           type: 'productive',
                           duration: selectedActivity.duration,
                           startTime: selectedActivity.startTime,
                           endTime: selectedActivity.endTime,
-                          windowTitle: selectedActivity.windowTitle || 'Manual Entry',
+                          windowTitle: 'Manual Entry', // Important: marks as manual, not screen activity
+                          source: 'manual', // Distinguishes from auto-tracked
                           date: selectedActivity.date || new Date(selectedActivity.startTime).toLocaleDateString()
                         };
-                        // Add to activities
+                        // Add NEW activity (original untracked stays)
                         addActivity(newActivity);
                         setSelectedActivity(null);
-                        // Open edit modal
+                        // Open edit modal for the new entry
                         setEditing(newActivity);
                         setShowModal(true);
                       }}
