@@ -200,8 +200,8 @@
       const [dragEnd, setDragEnd] = useState(null);
       const calRef = useRef();
 
-      // Collect ALL untracked activities into ONE continuous red bar
-      // But keep track of individual activities for the popup
+      // Process activities for timeline display
+      // Show ALL activities - tracked ones as blocks, untracked as thin red bars
       const processActivities = (acts) => {
         const sorted = acts.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
         const result = [];
@@ -264,7 +264,8 @@
       const onDown = (e) => {
         if (e.target === e.currentTarget) {
           const rect = calRef.current.getBoundingClientRect();
-          const y = e.clientY - rect.top;
+          const scrollTop = calRef.current.scrollTop || 0;
+          const y = e.clientY - rect.top + scrollTop;
           const time = getTimeFromPos(y);
           setDragStart(time);
           setDragging(true);
@@ -275,7 +276,8 @@
       const onMove = (e) => {
         if (dragging && dragStart) {
           const rect = calRef.current.getBoundingClientRect();
-          const y = e.clientY - rect.top;
+          const scrollTop = calRef.current.scrollTop || 0;
+          const y = e.clientY - rect.top + scrollTop;
           const time = getTimeFromPos(y);
           setDragEnd(time);
         }
@@ -295,6 +297,7 @@
           const duration = Math.floor((endDate - startDate) / 1000);
           
           if (duration >= 60) {
+            // Create new activity but DON'T save yet - open edit first
             const newActivity = {
               id: Date.now(),
               name: 'New Activity',
@@ -302,13 +305,11 @@
               duration: duration,
               startTime: startDate.toISOString(),
               endTime: endDate.toISOString(),
-              windowTitle: 'Manual Entry',
-              description: 'Created by dragging'
+              date: date.toLocaleDateString()
             };
             
-            addActivity(newActivity);
-            setEditing(newActivity);
-            setShowModal(true);
+            // Show edit popup first, let user edit before saving
+            setSelectedActivity(newActivity);
           }
         }
         
@@ -420,27 +421,26 @@
                           {new Date(a.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}-{new Date(a.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
                         </div>
                       )}
-                      {h > 50 && (
-                        <div className="text-xs opacity-60 truncate leading-none">
-                          {fmt(a.duration)}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </React.Fragment>
               );
             })}
 
-            {/* Drag preview */}
+            {/* Drag preview - purple highlight */}
             {dragging && dragStart && dragEnd && (
               <div 
-                className="absolute left-20 right-4 bg-pink-600 opacity-50 rounded z-20" 
+                className="absolute left-20 right-4 bg-purple-500 rounded z-30 border-2 border-purple-300 shadow-lg"
                 style={{
                   top: `${Math.min(dragStart.h * 60 + dragStart.m, dragEnd.h * 60 + dragEnd.m)}px`, 
-                  height: `${Math.abs((dragEnd.h * 60 + dragEnd.m) - (dragStart.h * 60 + dragStart.m))}px`, 
-                  minHeight: '2px'
+                  height: `${Math.max(Math.abs((dragEnd.h * 60 + dragEnd.m) - (dragStart.h * 60 + dragStart.m)), 15)}px`,
+                  opacity: 0.7
                 }}
-              />
+              >
+                <div className="text-white text-xs font-bold p-1">
+                  {Math.floor(Math.abs((dragEnd.h * 60 + dragEnd.m) - (dragStart.h * 60 + dragStart.m)) / 60)}h {Math.abs((dragEnd.h * 60 + dragEnd.m) - (dragStart.h * 60 + dragStart.m)) % 60}m
+                </div>
+              </div>
             )}
 
             {/* Toggl-style Activity Popup for Untracked Time */}
@@ -466,12 +466,12 @@
 
                 {/* Different UI for tracked vs untracked */}
                 {(selectedActivity.type === 'unclassified' || !selectedActivity.type) ? (
-                  // UNTRACKED ACTIVITY - Show details and "Copy as time entry"
+                  // UNTRACKED GAP - Show details and "Copy as time entry"
                   <>
                     <div className="mb-3">
                       <h4 className="text-white font-bold text-lg mb-2">UNTRACKED TIME</h4>
                       <p className="text-gray-300 text-sm">
-                        This time was not classified. You can copy it as a time entry.
+                        This time was not tracked. You can copy it as a time entry.
                       </p>
                     </div>
 
@@ -615,12 +615,19 @@
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Create updated activity with all changes
                           const updatedActivity = {...selectedActivity};
-                          // Update the activity in the list
-                          const updated = activities.map(a => 
-                            a.id === updatedActivity.id ? updatedActivity : a
-                          );
+                          // Check if this is a NEW activity (created from drag) or existing
+                          const existingIndex = activities.findIndex(a => a.id === updatedActivity.id);
+                          let updated;
+                          if (existingIndex === -1) {
+                            // NEW activity - add it
+                            updated = [...activities, updatedActivity];
+                          } else {
+                            // EXISTING - update it
+                            updated = activities.map(a => 
+                              a.id === updatedActivity.id ? updatedActivity : a
+                            );
+                          }
                           // Save to state and storage
                           setActivities(updated);
                           localStorage.setItem('acts', JSON.stringify(updated));
