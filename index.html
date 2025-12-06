@@ -206,15 +206,16 @@
         const sorted = acts.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
         const result = [];
         
-        // Check if activity is tracked (has a valid type that's not unclassified)
-        const isTracked = (a) => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral';
+        // Check if activity is classified (has a valid type - productive, unproductive, OR neutral)
+        // neutral = gray classified block, untracked = no type at all
+        const isClassified = (a) => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral';
         
         // Check if it's a real screen activity (not manual entry)
         const isScreenActivity = (a) => a.source === 'auto-tracked' || (a.windowTitle && a.windowTitle !== 'Manual Entry');
         
-        // Collect untracked SCREEN activities only (not manual entries)
-        const allUntracked = sorted.filter(a => !isTracked(a) && isScreenActivity(a));
-        const allTracked = sorted.filter(a => isTracked(a));
+        // Collect untracked SCREEN activities only (not manual entries, not classified)
+        const allUntracked = sorted.filter(a => !isClassified(a) && isScreenActivity(a));
+        const allClassified = sorted.filter(a => isClassified(a));
         
         // If there are untracked screen activities, create ONE merged block
         if (allUntracked.length > 0) {
@@ -225,7 +226,7 @@
           result.push({
             id: 'merged_untracked_block',
             name: 'Untracked',
-            type: 'unclassified',
+            type: 'untracked', // Use 'untracked' not 'unclassified'
             startTime: firstUntracked.startTime,
             endTime: lastUntracked.endTime,
             duration: totalDuration,
@@ -234,8 +235,8 @@
           });
         }
         
-        // Add all tracked activities
-        result.push(...allTracked);
+        // Add all classified activities (includes neutral as gray blocks)
+        result.push(...allClassified);
         
         return result;
       };
@@ -249,8 +250,9 @@
         const h = start.getHours();
         const m = start.getMinutes();
         
-        // For untracked activities, show as a continuous block with proper height
-        const isUntracked = activity.type === 'unclassified' || activity.name === 'Untracked';
+        // For untracked activities (thin red bar), show as a continuous block with proper height
+        // neutral type = classified gray block, NOT untracked
+        const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked';
         const duration = (end - start) / (1000 * 60);
         
         // Use proportional height for all blocks
@@ -328,8 +330,8 @@
         setSelectedActivity(selectedActivity?.id === activity.id ? null : activity);
       };
 
-      const totalTracked = today().filter(a => a.type === 'productive').reduce((sum, a) => sum + a.duration, 0);
-      const totalUntracked = today().filter(a => a.type === 'unclassified' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
+      const totalTracked = today().filter(a => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral').reduce((sum, a) => sum + a.duration, 0);
+      const totalUntracked = today().filter(a => a.type === 'untracked' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
 
       return (
         <div className="bg-gray-900 rounded-lg p-4">
@@ -364,11 +366,12 @@
               </div>
             ))}
 
-            {/* Activity blocks - thin colored bars on left + full blocks for tracked */}
+            {/* Activity blocks - thin colored bars on left + full blocks for classified */}
             {today().map(a => {
               const {top, h} = getPos(a);
-              // Check if tracked by type only
-              const isUntracked = a.type === 'unclassified' || !a.type || a.type === 'undefined';
+              // Untracked = no valid type, only thin red bar
+              // neutral = classified gray block (gets full block like productive/unproductive)
+              const isUntracked = a.type === 'untracked' || a.name === 'Untracked';
               
               // Get bar color based on type
               const getBarColor = (type) => {
@@ -473,8 +476,8 @@
                   ×
                 </button>
 
-                {/* Different UI for tracked vs untracked */}
-                {(selectedActivity.type === 'unclassified' || !selectedActivity.type) ? (
+                {/* Different UI for classified vs untracked */}
+                {(selectedActivity.type === 'untracked' || selectedActivity.name === 'Untracked') ? (
                   // UNTRACKED ACTIVITY - Show details and "Copy as time entry"
                   <>
                     <div className="mb-3">
@@ -577,9 +580,9 @@
                           onChange={(e) => setSelectedActivity({...selectedActivity, type: e.target.value})}
                           className="w-full bg-gray-800 rounded px-3 py-2 text-white"
                         >
-                          <option value="productive">Productive</option>
-                          <option value="unproductive">Unproductive</option>
-                          <option value="neutral">Neutral</option>
+                          <option value="productive">Productive (Green)</option>
+                          <option value="unproductive">Unproductive (Orange)</option>
+                          <option value="neutral">Neutral (Gray)</option>
                         </select>
                       </div>
 
@@ -630,12 +633,8 @@
                           const updated = activities.map(a => 
                             a.id === updatedActivity.id ? updatedActivity : a
                           );
-                          // Save to state and storage
+                          // Save to state (useEffect will save to file)
                           setActivities(updated);
-                          localStorage.setItem('acts', JSON.stringify(updated));
-                          if (window.electronAPI && window.electronAPI.saveActivities) {
-                            window.electronAPI.saveActivities(updated);
-                          }
                           setSelectedActivity(null);
                         }}
                         className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition-colors font-bold"
@@ -645,15 +644,9 @@
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Delete activity from list and storage
+                          // Delete activity from list (useEffect will save to file)
                           const updated = activities.filter(a => a.id !== selectedActivity.id);
                           setActivities(updated);
-                          // Save to all storage locations
-                          localStorage.setItem('acts', JSON.stringify(updated));
-                          sessionStorage.setItem('acts_backup', JSON.stringify(updated));
-                          if (window.electronAPI && window.electronAPI.saveActivities) {
-                            window.electronAPI.saveActivities(updated);
-                          }
                           setSelectedActivity(null);
                         }}
                         className="px-4 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition-colors"
@@ -695,14 +688,15 @@
         let untrackedBlock = null;
         
         sorted.forEach(act => {
-          const isUntracked = act.type === 'unclassified' || act.name === 'Untracked';
+          // Only merge 'untracked' type - neutral is a classified type and stays separate
+          const isUntracked = act.type === 'untracked' || act.name === 'Untracked';
           if (isUntracked) {
             if (!untrackedBlock) {
               untrackedBlock = {
                 ...act,
                 id: 'merged_untracked',
                 name: 'Untracked',
-                type: 'unclassified'
+                type: 'untracked'
               };
             } else {
               // Extend the untracked block
@@ -766,8 +760,8 @@
       const maxHour = timeMarkers[timeMarkers.length - 1]?.position || 23;
       const totalHours = maxHour - minHour;
 
-      const totalTracked = dayActivities.filter(a => a.type === 'productive').reduce((sum, a) => sum + a.duration, 0);
-      const totalUntracked = dayActivities.filter(a => a.type === 'unclassified' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
+      const totalTracked = dayActivities.filter(a => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral').reduce((sum, a) => sum + a.duration, 0);
+      const totalUntracked = dayActivities.filter(a => a.type === 'untracked' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
 
       return (
         <div className="bg-gray-900 rounded-lg p-4">
@@ -815,7 +809,8 @@
             {/* Activity blocks */}
             {dayActivities.map((activity, index) => {
               const { startPos, duration } = getActivityPosition(activity);
-              const isUntracked = activity.type === 'unclassified' || activity.name === 'Untracked';
+              // Only 'untracked' type is red, neutral is gray block
+              const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked';
               const bgColor = isUntracked ? 'bg-red-600 hover:bg-red-500' : getColor(activity.type).replace('bg-', 'bg-opacity-90 bg-');
               const top = ((startPos - minHour) / totalHours) * 100;
               const height = Math.max((duration / totalHours) * 100, 1);
@@ -1174,26 +1169,14 @@
             date: pomoStart.toLocaleDateString()
           };
           
-          const updated = [...activities, act];
-          setActivities(updated);
-          
-          // Save activities
-          localStorage.setItem('acts', JSON.stringify(updated));
-          sessionStorage.setItem('acts_backup', JSON.stringify(updated));
-          
-          if (window.electronAPI && window.electronAPI.saveActivities) {
-            window.electronAPI.saveActivities(updated);
-          }
+          // Add to activities - useEffect will save to file
+          setActivities(prev => [...prev, act]);
         }
         setPomoStart(null);
         const nextMode = pomoMode === 'focus' ? 'break' : 'focus';
         setPomoMode(nextMode);
         const nextTime = (nextMode === 'focus' ? focusMin : breakMin) * 60;
         setPomoTime(nextTime);
-        
-        // Clear Pomodoro state
-        localStorage.removeItem('pomoState');
-        sessionStorage.removeItem('pomoState_backup');
       };
 
       const pomoStop = () => {
@@ -1260,7 +1243,7 @@
             const act = {
               id: Date.now(),
               name: 'New Activity',
-              type: 'unclassified',
+              type: 'productive',
               startTime: start.toISOString(),
               endTime: end.toISOString(),
               duration: dur,
@@ -1283,7 +1266,8 @@
         let currentUntrackedGroup = null;
         
         sorted.forEach(activity => {
-          const isUntracked = activity.type === 'unclassified' || activity.name === 'Untracked';
+          // Only 'untracked' type or activities with no type at all
+          const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked' || (!activity.type && activity.source === 'auto-tracked');
           
           if (isUntracked) {
             if (!currentUntrackedGroup) {
@@ -1331,12 +1315,13 @@
         const top = start.getHours() * 60 + (start.getMinutes() / 60) * 60;
         
         // For untracked activities, use a very small fixed height
-        const isUntracked = a.type === 'unclassified' || a.name === 'Untracked';
+        // neutral type = classified gray block, gets full height
+        const isUntracked = a.type === 'untracked' || a.name === 'Untracked';
         if (isUntracked) {
           return { top, h: 12 }; // Very small rectangle - 12px height
         }
         
-        // For regular activities, use proportional height
+        // For regular activities (including neutral), use proportional height
         const h = Math.max(30, (a.duration / 3600) * 60);
         return { top, h };
       };
@@ -1346,22 +1331,7 @@
         setActivities(updated);
         setShowModal(false);
         
-        // Save activities with enhanced persistence
-        localStorage.setItem('acts', JSON.stringify(updated));
-        sessionStorage.setItem('acts_backup', JSON.stringify(updated));
-        
-        // Save Pomodoro state
-        localStorage.setItem('pomoState', JSON.stringify({
-          time: pomoTime,
-          mode: pomoMode,
-          running: pomoRunning,
-          start: pomoStart,
-          type: pomoType
-        }));
-        
-        if (window.electronAPI) {
-          window.electronAPI.saveActivities(updated);
-        }
+        // File save happens automatically via useEffect
       };
 
       const del = (id) => {
@@ -1372,14 +1342,7 @@
       const addActivity = (activity) => {
         const updated = [...activities, activity];
         setActivities(updated);
-        
-        // Save with persistence
-        localStorage.setItem('acts', JSON.stringify(updated));
-        sessionStorage.setItem('acts_backup', JSON.stringify(updated));
-        
-        if (window.electronAPI) {
-          window.electronAPI.saveActivities(updated);
-        }
+        // File save happens automatically via useEffect
       };
 
       const hours = Array.from({length: 24}, (_, i) => i);
@@ -1529,10 +1492,10 @@
                           ❌ Unproductive
                         </button>
                         <button 
-                          onClick={() => setPomoType('unclassified')} 
+                          onClick={() => setPomoType('neutral')} 
                           disabled={pomoRunning}
                           className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
-                            pomoType === 'unclassified' 
+                            pomoType === 'neutral' 
                               ? 'bg-gray-600 text-white' 
                               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                           } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1726,9 +1689,9 @@
                     <div>
                       <label className="block text-sm text-gray-400 mb-2">Type</label>
                       <select value={editing.type} onChange={(e) => setEditing({...editing, type: e.target.value})} className="w-full bg-gray-700 rounded px-4 py-2">
-                        <option value="unclassified">Unclassified</option>
-                        <option value="productive">Productive</option>
-                        <option value="unproductive">Unproductive</option>
+                        <option value="productive">Productive (Green)</option>
+                        <option value="unproductive">Unproductive (Orange)</option>
+                        <option value="neutral">Neutral (Gray)</option>
                       </select>
                     </div>
 
