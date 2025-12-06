@@ -6,6 +6,24 @@ const ScreenTracker = require('./tracker');
 let mainWindow;
 let tray;
 let tracker;
+let isShuttingDown = false;
+
+// Graceful shutdown - sync before exit
+async function gracefulShutdown() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    console.log('\n🔄 Syncing data before exit...');
+    
+    if (tracker) {
+        try {
+            await tracker.stop();
+            console.log('✅ Sync complete!');
+        } catch (err) {
+            console.error('❌ Error during sync:', err.message);
+        }
+    }
+}
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -36,21 +54,32 @@ function createWindow() {
         }
     }, 10000);
 
+    // X button minimizes to tray instead of closing
     mainWindow.on('close', (event) => {
         if (!app.isQuitting) {
             event.preventDefault();
             mainWindow.hide();
+            
+            // Show notification that app is still running (only if tray exists)
+            if (tray) {
+                tray.displayBalloon({
+                    title: 'Productivity Tracker',
+                    content: 'App minimized to tray. Right-click tray icon to exit.'
+                });
+            }
         }
-        return false;
     });
 }
 
 function createTray() {
-    // Check if icon exists, otherwise skip tray creation
-    const iconPath = path.join(__dirname, 'icon.png');
+    // Check if icon exists - try .ico first (Windows), then .png
+    let iconPath = path.join(__dirname, 'icon.ico');
+    if (!fs.existsSync(iconPath)) {
+        iconPath = path.join(__dirname, 'icon.png');
+    }
 
     if (!fs.existsSync(iconPath)) {
-        console.log('⚠️  No icon.png found - skipping system tray. Add icon.png to enable tray.');
+        console.log('⚠️  No icon.ico or icon.png found - skipping system tray.');
         return;
     }
 
@@ -65,16 +94,14 @@ function createTray() {
                     mainWindow.focus();
                 }
             },
-            {
-                label: 'Hide App',
-                click: () => mainWindow.hide()
-            },
             { type: 'separator' },
             {
-                label: 'Quit',
-                click: () => {
+                label: 'Exit',
+                click: async () => {
+                    console.log('🚪 Exit clicked from tray');
                     app.isQuitting = true;
-                    app.quit();
+                    await gracefulShutdown();
+                    app.exit(0);
                 }
             }
         ]);
@@ -111,11 +138,9 @@ app.on('activate', () => {
     }
 });
 
+// Handle app quit - sync before exit
 app.on('before-quit', () => {
     app.isQuitting = true;
-    if (tracker) {
-        tracker.stop();
-    }
 });
 
 // IPC Handlers

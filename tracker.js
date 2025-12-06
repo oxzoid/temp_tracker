@@ -161,20 +161,33 @@ class ScreenTracker {
     // Only save when a new activity is completed
   }
 
-  stop() {
-    console.log('🛑 Screen tracker stopped');
+  async stop() {
+    console.log('🛑 Screen tracker stopping...');
     if (this.intervalId) {
       clearInterval(this.intervalId);
     }
     if (this.saveIntervalId) {
       clearInterval(this.saveIntervalId);
     }
-    this.saveCurrentActivity();
-    this.saveToFile(); // Final save
     
-    if (this.mongoClient) {
-      this.mongoClient.close();
+    // Save current activity
+    this.saveCurrentActivity();
+    this.saveToFile();
+    
+    // Sync to MongoDB before closing
+    if (this.db) {
+      console.log('☁️ Syncing to MongoDB before exit...');
+      await this.syncToMongoDB(this.activities);
+      console.log('✅ MongoDB sync complete');
     }
+    
+    // Close MongoDB connection
+    if (this.mongoClient) {
+      await this.mongoClient.close();
+      console.log('🔌 MongoDB connection closed');
+    }
+    
+    console.log('🛑 Screen tracker stopped');
   }
 
   async checkActiveWindow() {
