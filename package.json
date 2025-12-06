@@ -37,9 +37,9 @@
     ]
   },
   "dependencies": {
-    "electron": "^28.0.0",
     "active-win": "^8.0.0",
-    "mongodb": "^6.3.0"
+    "electron": "^28.0.0",
+    "mongodb": "^6.21.0"
   },
   "devDependencies": {
     "electron-builder": "^24.9.0"

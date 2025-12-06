@@ -134,13 +134,21 @@ ipcMain.handle('set-mongo-config', async (event, config) => {
     return { success: true };
 });
 
+ipcMain.handle('sync-mongodb', async () => {
+    if (tracker && tracker.db) {
+        await tracker.syncFromMongoDB();
+        return { success: true, count: tracker.activities.length };
+    }
+    return { success: false, error: 'MongoDB not connected' };
+});
+
 ipcMain.handle('save-activities', async (event, activities) => {
     try {
         // Save to JSON file
         const dataPath = path.join(__dirname, 'activities-data.json');
         fs.writeFileSync(dataPath, JSON.stringify(activities, null, 2));
         
-        // Also update tracker if it has a method for this
+        // Also update tracker - this will sync to both file AND MongoDB
         if (tracker && tracker.saveActivities) {
             tracker.saveActivities(activities);
         }

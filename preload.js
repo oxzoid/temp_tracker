@@ -26,5 +26,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Save activities
     saveActivities: (activities) => {
         return ipcRenderer.invoke('save-activities', activities);
+    },
+
+    // Sync with MongoDB
+    syncMongoDB: () => {
+        return ipcRenderer.invoke('sync-mongodb');
     }
 });

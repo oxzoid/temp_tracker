@@ -41,6 +41,73 @@ class ScreenTracker {
   saveActivities(newActivities) {
     this.activities = newActivities;
     this.saveToFile();
+    // Also sync all changes to MongoDB (including deletions)
+    this.syncToMongoDB(newActivities);
+    this.syncDeletionsToMongoDB(newActivities.map(a => a.id));
+  }
+
+  async syncToMongoDB(activities) {
+    if (!this.db) return;
+    
+    try {
+      // For now, upsert each activity (update if exists, insert if not)
+      const collection = this.db.collection('activities');
+      
+      for (const activity of activities) {
+        // Remove _id from the update to avoid MongoDB error
+        const { _id, ...activityWithoutId } = activity;
+        
+        await collection.updateOne(
+          { id: activity.id },
+          { $set: activityWithoutId },
+          { upsert: true }
+        );
+      }
+      
+      console.log(`☁️ Synced ${activities.length} activities to MongoDB`);
+    } catch (error) {
+      console.error('❌ Error syncing to MongoDB:', error.message);
+    }
+  }
+
+  async syncFromMongoDB() {
+    if (!this.db) return this.activities;
+    
+    try {
+      // Load last 30 days from MongoDB
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const mongoActivities = await this.db.collection('activities')
+        .find({ 
+          startTime: { $gte: thirtyDaysAgo.toISOString() }
+        })
+        .sort({ startTime: -1 })
+        .limit(1000)
+        .toArray();
+      
+      // Merge: MongoDB activities take priority for same ID
+      const merged = new Map();
+      
+      // Add local activities first
+      this.activities.forEach(a => merged.set(a.id, a));
+      
+      // MongoDB activities override (they're the "truth" for synced data)
+      mongoActivities.forEach(a => merged.set(a.id, a));
+      
+      this.activities = Array.from(merged.values())
+        .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+      
+      console.log(`📊 Synced from MongoDB: ${mongoActivities.length} activities, total: ${this.activities.length}`);
+      
+      // Save merged data back to local file
+      this.saveToFile();
+      
+      return this.activities;
+    } catch (error) {
+      console.error('❌ Error syncing from MongoDB:', error.message);
+      return this.activities;
+    }
   }
 
   saveToFile() {
@@ -71,26 +138,13 @@ class ScreenTracker {
       this.db = this.mongoClient.db(dbName);
       console.log('✅ Connected to MongoDB:', dbName);
       
-      // Load existing activities from last 7 days
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
+      // Bidirectional sync: merge MongoDB and local, then upload all to MongoDB
+      await this.syncFromMongoDB();
       
-      const existing = await this.db.collection('activities')
-        .find({ 
-          startTime: { $gte: weekAgo.toISOString() }
-        })
-        .sort({ startTime: -1 })
-        .limit(500)
-        .toArray();
+      // Upload any local-only activities to MongoDB
+      await this.syncToMongoDB(this.activities);
       
-      // Merge with local activities (avoid duplicates)
-      existing.forEach(mongoActivity => {
-        if (!this.activities.find(a => a.id === mongoActivity.id)) {
-          this.activities.push(mongoActivity);
-        }
-      });
-      
-      console.log(`📊 Total activities: ${this.activities.length} (merged from MongoDB + local)`);
+      console.log(`📊 Bidirectional sync complete: ${this.activities.length} total activities`);
       return true;
     } catch (error) {
       console.error('❌ MongoDB connection error:', error.message);
@@ -202,6 +256,41 @@ class ScreenTracker {
       console.log(`☁️ Synced to MongoDB: ${activity.name}`);
     } catch (error) {
       console.error('❌ Error saving to MongoDB:', error.message);
+    }
+  }
+
+  async deleteFromMongoDB(activityId) {
+    if (!this.db) return;
+    
+    try {
+      await this.db.collection('activities').deleteOne({ id: activityId });
+      console.log(`🗑️ Deleted from MongoDB: ${activityId}`);
+    } catch (error) {
+      console.error('❌ Error deleting from MongoDB:', error.message);
+    }
+  }
+
+  // Sync deletions: find activities in MongoDB that are not in local
+  async syncDeletionsToMongoDB(localActivityIds) {
+    if (!this.db) return;
+    
+    try {
+      // Get all IDs currently in MongoDB
+      const mongoActivities = await this.db.collection('activities')
+        .find({}, { projection: { id: 1 } })
+        .toArray();
+      
+      const mongoIds = mongoActivities.map(a => a.id);
+      const localIdSet = new Set(localActivityIds);
+      
+      // Delete from MongoDB any that aren't in local anymore
+      for (const mongoId of mongoIds) {
+        if (!localIdSet.has(mongoId)) {
+          await this.deleteFromMongoDB(mongoId);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error syncing deletions:', error.message);
     }
   }
 

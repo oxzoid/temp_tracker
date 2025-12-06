@@ -1015,6 +1015,16 @@
         };
       }, [data, title]);
       
+      // Show message if no data
+      if (!data || data.length === 0) {
+        return (
+          <div className="h-64 flex flex-col items-center justify-center text-gray-400">
+            <div className="text-lg font-bold mb-2">{title}</div>
+            <div>No activity data</div>
+          </div>
+        );
+      }
+      
       return <div className="h-64"><canvas ref={canvasRef}></canvas></div>;
     };
 
@@ -1170,11 +1180,21 @@
             startTime: pomoStart.toISOString(),
             endTime: end.toISOString(),
             duration: dur,
-            date: pomoStart.toLocaleDateString()
+            date: pomoStart.toLocaleDateString(),
+            source: 'pomodoro'
           };
           
-          // Add to activities - useEffect will save to file
-          setActivities(prev => [...prev, act]);
+          // Add to activities and explicitly save
+          setActivities(prev => {
+            const updated = [...prev, act];
+            // Explicitly save to file
+            if (window.electronAPI && window.electronAPI.saveActivities) {
+              window.electronAPI.saveActivities(updated);
+            }
+            return updated;
+          });
+          
+          console.log('🍅 Pomodoro saved:', act.name, dur, 'seconds');
         }
         setPomoStart(null);
         const nextMode = pomoMode === 'focus' ? 'break' : 'focus';
@@ -1191,13 +1211,24 @@
             const act = {
               id: Date.now(),
               name: `Pomodoro (Stopped) - ${pomoType}`,
-              type: pomoType, // Use the selected classification
+              type: pomoType,
               startTime: pomoStart.toISOString(),
               endTime: end.toISOString(),
               duration: dur,
-              date: pomoStart.toLocaleDateString()
+              date: pomoStart.toLocaleDateString(),
+              source: 'pomodoro'
             };
-            setActivities(p => [...p, act]);
+            
+            // Add and explicitly save
+            setActivities(prev => {
+              const updated = [...prev, act];
+              if (window.electronAPI && window.electronAPI.saveActivities) {
+                window.electronAPI.saveActivities(updated);
+              }
+              return updated;
+            });
+            
+            console.log('🍅 Pomodoro (stopped) saved:', act.name, dur, 'seconds');
           }
         }
         setPomoRunning(false);
@@ -1379,10 +1410,33 @@
                       <input type="text" value={mongoColl} onChange={(e) => setMongoColl(e.target.value)} className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
                     </div>
                   </div>
-                  <button onClick={saveMongo} className="bg-pink-600 hover:bg-pink-700 px-6 py-2 rounded">
-                    Save & Connect
-                  </button>
-                  <p className="text-xs text-gray-400 mt-2">Data also saves to local file automatically</p>
+                  <div className="flex gap-3">
+                    <button onClick={saveMongo} className="bg-pink-600 hover:bg-pink-700 px-6 py-2 rounded">
+                      Save & Connect
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        if (window.electronAPI && window.electronAPI.syncMongoDB) {
+                          const result = await window.electronAPI.syncMongoDB();
+                          if (result.success) {
+                            // Reload activities after sync
+                            const acts = await window.electronAPI.getActivities();
+                            setActivities(acts);
+                            alert(`Synced! ${result.count} activities total.`);
+                          } else {
+                            alert('Sync failed: ' + (result.error || 'Unknown error'));
+                          }
+                        }
+                      }} 
+                      className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded"
+                    >
+                      🔄 Sync Now
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    ✅ Bidirectional sync: Changes sync to both local file and MongoDB.<br/>
+                    ✅ Deletions also sync to MongoDB.
+                  </p>
                 </div>
               </div>
             )}
@@ -1591,23 +1645,26 @@
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <PieChart 
                     data={(() => {
-                      // Get today's date in the same format stored in activities
+                      // Get today's date in multiple formats for comparison
                       const today = new Date();
                       const todayStr = today.toLocaleDateString();
+                      const todayDateStr = today.toDateString();
                       
-                      // Filter activities for today - check both date formats
+                      // Filter activities for today - check multiple date formats
                       const dayActivities = activities.filter(a => {
-                        if (a.date) {
-                          // Compare stored date
-                          return a.date === todayStr || a.date === `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
-                        }
+                        // Check by startTime first (most reliable)
                         if (a.startTime) {
-                          return new Date(a.startTime).toDateString() === today.toDateString();
+                          const actDate = new Date(a.startTime);
+                          return actDate.toDateString() === todayDateStr;
+                        }
+                        // Fallback to date field
+                        if (a.date) {
+                          return a.date === todayStr;
                         }
                         return false;
                       });
                       
-                      console.log('Today activities:', dayActivities.length, 'from', activities.length);
+                      console.log('Today activities:', dayActivities.length, 'from', activities.length, 'todayStr:', todayStr);
                       
                       // Group by type
                       const grouped = { productive: 0, unproductive: 0, neutral: 0, untracked: 0 };
