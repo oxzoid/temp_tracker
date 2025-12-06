@@ -1022,9 +1022,18 @@
       const [showModal, setShowModal] = useState(false);
       
       // Initialize from localStorage to preserve user's custom settings
-      const [focusMin, setFocusMin] = useState(() => Number(localStorage.getItem('defaultFocusMin')) || 25);
-      const [breakMin, setBreakMin] = useState(() => Number(localStorage.getItem('defaultBreakMin')) || 5);
-      const [pomoTime, setPomoTime] = useState(() => (Number(localStorage.getItem('defaultFocusMin')) || 25) * 60);
+      const [focusMin, setFocusMin] = useState(() => {
+        const saved = localStorage.getItem('defaultFocusMin');
+        return saved !== null ? Number(saved) : 25;
+      });
+      const [breakMin, setBreakMin] = useState(() => {
+        const saved = localStorage.getItem('defaultBreakMin');
+        return saved !== null ? Number(saved) : 5;
+      });
+      const [pomoTime, setPomoTime] = useState(() => {
+        const saved = localStorage.getItem('defaultFocusMin');
+        return saved !== null ? Number(saved) * 60 : 25 * 60;
+      });
       const [pomoMode, setPomoMode] = useState('focus');
       const [pomoRunning, setPomoRunning] = useState(false);
       const [pomoStart, setPomoStart] = useState(null);
@@ -1546,7 +1555,7 @@
                         const newFocusMin = Number(e.target.value);
                         setFocusMin(newFocusMin); 
                         // Save as default
-                        localStorage.setItem('defaultFocusMin', newFocusMin);
+                        localStorage.setItem('defaultFocusMin', String(newFocusMin));
                         if (pomoMode === 'focus' && !pomoRunning) {
                           setPomoTime(newFocusMin * 60);
                         }
@@ -1558,7 +1567,7 @@
                         const newBreakMin = Number(e.target.value);
                         setBreakMin(newBreakMin); 
                         // Save as default
-                        localStorage.setItem('defaultBreakMin', newBreakMin);
+                        localStorage.setItem('defaultBreakMin', String(newBreakMin));
                         if (pomoMode === 'break' && !pomoRunning) {
                           setPomoTime(newBreakMin * 60);
                         }
