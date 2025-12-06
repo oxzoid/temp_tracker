@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, protocol, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ScreenTracker = require('./tracker');
