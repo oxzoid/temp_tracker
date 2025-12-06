@@ -200,8 +200,8 @@
       const [dragEnd, setDragEnd] = useState(null);
       const calRef = useRef();
 
-      // Process activities for timeline display
-      // Show ALL activities - tracked ones as blocks, untracked as thin red bars
+      // Collect ALL untracked activities into ONE continuous red bar
+      // But keep track of individual activities for the popup
       const processActivities = (acts) => {
         const sorted = acts.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
         const result = [];
@@ -297,7 +297,6 @@
           const duration = Math.floor((endDate - startDate) / 1000);
           
           if (duration >= 60) {
-            // Create new activity but DON'T save yet - open edit first
             const newActivity = {
               id: Date.now(),
               name: 'New Activity',
@@ -305,11 +304,13 @@
               duration: duration,
               startTime: startDate.toISOString(),
               endTime: endDate.toISOString(),
-              date: date.toLocaleDateString()
+              windowTitle: 'Manual Entry',
+              description: 'Created by dragging'
             };
             
-            // Show edit popup first, let user edit before saving
-            setSelectedActivity(newActivity);
+            addActivity(newActivity);
+            setEditing(newActivity);
+            setShowModal(true);
           }
         }
         
@@ -421,6 +422,11 @@
                           {new Date(a.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}-{new Date(a.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
                         </div>
                       )}
+                      {h > 50 && (
+                        <div className="text-xs opacity-60 truncate leading-none">
+                          {fmt(a.duration)}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </React.Fragment>
@@ -466,12 +472,12 @@
 
                 {/* Different UI for tracked vs untracked */}
                 {(selectedActivity.type === 'unclassified' || !selectedActivity.type) ? (
-                  // UNTRACKED GAP - Show details and "Copy as time entry"
+                  // UNTRACKED ACTIVITY - Show details and "Copy as time entry"
                   <>
                     <div className="mb-3">
                       <h4 className="text-white font-bold text-lg mb-2">UNTRACKED TIME</h4>
                       <p className="text-gray-300 text-sm">
-                        This time was not tracked. You can copy it as a time entry.
+                        This time was not classified. You can copy it as a time entry.
                       </p>
                     </div>
 
@@ -615,19 +621,12 @@
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          // Create updated activity with all changes
                           const updatedActivity = {...selectedActivity};
-                          // Check if this is a NEW activity (created from drag) or existing
-                          const existingIndex = activities.findIndex(a => a.id === updatedActivity.id);
-                          let updated;
-                          if (existingIndex === -1) {
-                            // NEW activity - add it
-                            updated = [...activities, updatedActivity];
-                          } else {
-                            // EXISTING - update it
-                            updated = activities.map(a => 
-                              a.id === updatedActivity.id ? updatedActivity : a
-                            );
-                          }
+                          // Update the activity in the list
+                          const updated = activities.map(a => 
+                            a.id === updatedActivity.id ? updatedActivity : a
+                          );
                           // Save to state and storage
                           setActivities(updated);
                           localStorage.setItem('acts', JSON.stringify(updated));
