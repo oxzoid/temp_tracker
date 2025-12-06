@@ -209,11 +209,14 @@
         // Check if activity is tracked (has a valid type that's not unclassified)
         const isTracked = (a) => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral';
         
-        // Collect all untracked activities (type is unclassified or missing)
-        const allUntracked = sorted.filter(a => !isTracked(a));
+        // Check if it's a real screen activity (not manual entry)
+        const isScreenActivity = (a) => a.source === 'auto-tracked' || (a.windowTitle && a.windowTitle !== 'Manual Entry');
+        
+        // Collect untracked SCREEN activities only (not manual entries)
+        const allUntracked = sorted.filter(a => !isTracked(a) && isScreenActivity(a));
         const allTracked = sorted.filter(a => isTracked(a));
         
-        // If there are untracked activities, create ONE merged block with all details
+        // If there are untracked screen activities, create ONE merged block
         if (allUntracked.length > 0) {
           const firstUntracked = allUntracked[0];
           const lastUntracked = allUntracked[allUntracked.length - 1];
