@@ -20,8 +20,8 @@ function createWindow() {
 
     mainWindow.loadFile('index.html');
 
-    // Uncomment to open DevTools
-    // mainWindow.webContents.openDevTools();
+    // Open DevTools to see errors
+    mainWindow.webContents.openDevTools();
 
     createTray();
 
