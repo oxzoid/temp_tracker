@@ -133,3 +133,21 @@ ipcMain.handle('set-mongo-config', async (event, config) => {
     }
     return { success: true };
 });
+
+ipcMain.handle('save-activities', async (event, activities) => {
+    try {
+        // Save to JSON file
+        const dataPath = path.join(__dirname, 'activities-data.json');
+        fs.writeFileSync(dataPath, JSON.stringify(activities, null, 2));
+        
+        // Also update tracker if it has a method for this
+        if (tracker && tracker.saveActivities) {
+            tracker.saveActivities(activities);
+        }
+        
+        return { success: true };
+    } catch (error) {
+        console.error('Error saving activities:', error);
+        return { success: false, error: error.message };
+    }
+});

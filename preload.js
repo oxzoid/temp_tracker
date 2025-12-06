@@ -21,5 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Set MongoDB config
     setMongoConfig: (config) => {
         return ipcRenderer.invoke('set-mongo-config', config);
+    },
+
+    // Save activities
+    saveActivities: (activities) => {
+        return ipcRenderer.invoke('save-activities', activities);
     }
 });
