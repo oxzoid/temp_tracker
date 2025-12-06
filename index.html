@@ -1057,55 +1057,40 @@
       const calRef = useRef(null);
       const pomoRef = useRef(null);
 
-      // Enhanced data persistence
+      // Data persistence - ONLY use file via Electron, no localStorage
       useEffect(() => {
-        // Load from localStorage first
-        const saved = localStorage.getItem('acts');
-        if (saved) {
-          try {
-            const parsedData = JSON.parse(saved);
-            setActivities(Array.isArray(parsedData) ? parsedData : []);
-          } catch (error) {
-            console.error('Error parsing saved activities:', error);
-            setActivities([]);
-          }
-        }
+        // Clear any old localStorage/sessionStorage data to prevent conflicts
+        try {
+          localStorage.removeItem('acts');
+          sessionStorage.removeItem('acts_backup');
+        } catch(e) {}
         
-        // Pomodoro times are now initialized from localStorage in useState
-        // Just ensure timer starts in focus mode (not running)
-        // Timer value is already correctly set from localStorage
+        // Helper to deduplicate activities
+        const deduplicateActivities = (acts) => {
+          const seen = new Set();
+          return acts.filter(a => {
+            const key = `${a.startTime}_${a.endTime}_${a.name}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        };
         
-        // Also load from Electron if available
+        // Load ONLY from Electron file (activities-data.json)
         if (window.electronAPI) {
-          window.electronAPI.getActivities().then(electronActivities => {
-            if (electronActivities && electronActivities.length > 0) {
-              setActivities(prev => {
-                // Merge activities avoiding duplicates
-                const merged = [...prev];
-                electronActivities.forEach(eActivity => {
-                  if (!merged.find(a => a.id === eActivity.id)) {
-                    merged.push(eActivity);
-                  }
-                });
-                return merged.sort((a,b) => new Date(b.startTime) - new Date(a.startTime));
-              });
+          window.electronAPI.getActivities().then(fileActivities => {
+            if (fileActivities && fileActivities.length > 0) {
+              const deduplicated = deduplicateActivities(fileActivities);
+              setActivities(deduplicated);
             }
-          }).catch(err => console.log('Electron activities not available:', err));
+          }).catch(err => console.log('Could not load activities:', err));
         }
       }, []);
 
-      // Save to localStorage whenever activities change
+      // Save to file whenever activities change
       useEffect(() => {
-        try {
-          localStorage.setItem('acts', JSON.stringify(activities));
-          
-          // Also save to sessionStorage as backup
-          sessionStorage.setItem('acts_backup', JSON.stringify({
-            timestamp: Date.now(),
-            data: activities
-          }));
-        } catch (error) {
-          console.error('Error saving activities:', error);
+        if (activities.length > 0 && window.electronAPI && window.electronAPI.saveActivities) {
+          window.electronAPI.saveActivities(activities);
         }
       }, [activities]);
 
