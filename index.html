@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Productivity Tracker</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { Play, Pause, Square, Trash2, BarChart3, Calendar, Clock, Database, Edit2, X, Check, RefreshCw } = lucide;
+
+    const ProductivityTracker = () => {
+      const [activeTab, setActiveTab] = useState('calendar');
+      const [activities, setActivities] = useState([]);
+      const [selectedDate, setSelectedDate] = useState(new Date());
+      const [dragStart, setDragStart] = useState(null);
+      const [dragEnd, setDragEnd] = useState(null);
+      const [isDragging, setIsDragging] = useState(false);
+      const [editingActivity, setEditingActivity] = useState(null);
+      const [showEditModal, setShowEditModal] = useState(false);
+      const [statsView, setStatsView] = useState('today');
+      
+      const [pomodoroTime, setPomodoroTime] = useState(25 * 60);
+      const [pomodoroMode, setPomodoroMode] = useState('focus');
+      const [pomodoroRunning, setPomodoroRunning] = useState(false);
+      const [focusDuration, setFocusDuration] = useState(25);
+      const [breakDuration, setBreakDuration] = useState(5);
+      const [pomodoroSessionStart, setPomodoroSessionStart] = useState(null);
+      
+      const [showMongoConfig, setShowMongoConfig] = useState(false);
+      const [mongoUri, setMongoUri] = useState(localStorage.getItem('mongoUri') || '');
+      const [mongoApiKey, setMongoApiKey] = useState(localStorage.getItem('mongoApiKey') || '');
+      const [mongoDb, setMongoDb] = useState(localStorage.getItem('mongoDb') || 'productivity_tracker');
+      const [mongoCollection, setMongoCollection] = useState(localStorage.getItem('mongoCollection') || 'activities');
+      
+      const calendarRef = useRef(null);
+      const pomodoroIntervalRef = useRef(null);
+
+      useEffect(() => {
+        const saved = localStorage.getItem('activities_timeline');
+        if (saved) {
+          setActivities(JSON.parse(saved));
+        }
+      }, []);
+
+      useEffect(() => {
+        localStorage.setItem('activities_timeline', JSON.stringify(activities));
+      }, [activities]);
+
+      useEffect(() => {
+        if (pomodoroRunning && pomodoroTime > 0) {
+          pomodoroIntervalRef.current = setInterval(() => {
+            setPomodoroTime(prev => {
+              if (prev <= 1) {
+                handlePomodoroComplete();
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        } else {
+          clearInterval(pomodoroIntervalRef.current);
+        }
+        return () => clearInterval(pomodoroIntervalRef.current);
+      }, [pomodoroRunning, pomodoroTime]);
+
+      // Electron Integration
+      useEffect(() => {
+        if (window.electronAPI) {
+          console.log('🔌 Electron API detected - enabling auto-tracking');
+          
+          window.electronAPI.onScreenActivities((trackedActivities) => {
+            console.log('📥 Received tracked activities:', trackedActivities.length);
+            setActivities(prev => {
+              const merged = [...prev];
+              trackedActivities.forEach(tracked => {
+                if (!merged.find(a => a.id === tracked.id)) {
+                  merged.push(tracked);
+                }
+              });
+              return merged.sort((a, b) => 
+                new Date(b.startTime) - new Date(a.startTime)
+              );
+            });
+          });
+          
+          window.electronAPI.getActivities().then(allActivities => {
+            console.log('📂 Loaded activities from Electron:', allActivities.length);
+            if (allActivities.length > 0) {
+              setActivities(allActivities);
+            }
+          });
+        } else {
+          console.log('🌐 Running in browser mode - no auto-tracking');
+        }
+      }, []);
+
+      const handlePomodoroComplete = () => {
+        setPomodoroRunning(false);
+        
+        if (pomodoroMode === 'focus' && pomodoroSessionStart) {
+          const endTime = new Date();
+          const startTime = pomodoroSessionStart;
+          const duration = Math.floor((endTime - startTime) / 1000);
+          
+          const newActivity = {
+            id: Date.now(),
+            name: `Pomodoro Focus Session (Complete)`,
+            type: 'productive',
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            duration: duration,
+            date: startTime.toLocaleDateString()
+          };
+          
+          setActivities(prev => [...prev, newActivity]);
+          saveToMongoDB(newActivity);
+        }
+        
+        setPomodoroSessionStart(null);
+        
+        if (pomodoroMode === 'focus') {
+          setPomodoroMode('break');
+          setPomodoroTime(breakDuration * 60);
+        } else {
+          setPomodoroMode('focus');
+          setPomodoroTime(focusDuration * 60);
+        }
+      };
+
+      const handlePomodoroStop = () => {
+        if (pomodoroSessionStart) {
+          const endTime = new Date();
+          const startTime = pomodoroSessionStart;
+          const duration = Math.floor((endTime - startTime) / 1000);
+          
+          if (duration > 5) {
+            const newActivity = {
+              id: Date.now(),
+              name: `Pomodoro Focus Session (Stopped Early)`,
+              type: 'productive',
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              duration: duration,
+              date: startTime.toLocaleDateString()
+            };
+            
+            setActivities(prev => [...prev, newActivity]);
+            saveToMongoDB(newActivity);
+          }
+        }
+        
+        setPomodoroRunning(false);
+        setPomodoroSessionStart(null);
+        setPomodoroMode('focus');
+        setPomodoroTime(focusDuration * 60);
+      };
+
+      const handlePomodoroReset = () => {
+        setPomodoroRunning(false);
+        setPomodoroSessionStart(null);
+        setPomodoroMode('focus');
+        setPomodoroTime(focusDuration * 60);
+      };
+
+      const saveMongoConfig = () => {
+        localStorage.setItem('mongoUri', mongoUri);
+        localStorage.setItem('mongoApiKey', mongoApiKey);
+        localStorage.setItem('mongoDb', mongoDb);
+        localStorage.setItem('mongoCollection', mongoCollection);
+        setShowMongoConfig(false);
+        
+        if (window.electronAPI) {
+          window.electronAPI.setMongoConfig({
+            uri: mongoUri,
+            database: mongoDb
+          });
+        }
+      };
+
+      const saveToMongoDB = async (activity) => {
+        if (!mongoUri || !mongoApiKey) return;
+        
+        try {
+          await fetch(`${mongoUri}/action/insertOne`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'api-key': mongoApiKey,
+            },
+            body: JSON.stringify({
+              dataSource: 'Cluster0',
+              database: mongoDb,
+              collection: mongoCollection,
+              document: activity
+            })
+          });
+        } catch (error) {
+          console.error('MongoDB save error:', error);
+        }
+      };
+
+      const formatTime = (seconds) => {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      const formatPomodoroTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      const getHourFromY = (y, containerTop) => {
+        const relativeY = y - containerTop;
+        const hourHeight = 60;
+        const hour = Math.floor(relativeY / hourHeight);
+        const minutes = Math.floor((relativeY % hourHeight) / hourHeight * 60);
+        return { hour, minutes };
+      };
+
+      const handleMouseDown = (e) => {
+        const rect = calendarRef.current.getBoundingClientRect();
+        const { hour, minutes } = getHourFromY(e.clientY, rect.top);
+        setDragStart({ hour, minutes });
+        setIsDragging(true);
+        e.preventDefault();
+      };
+
+      const handleMouseMove = (e) => {
+        if (isDragging && dragStart) {
+          const rect = calendarRef.current.getBoundingClientRect();
+          const { hour, minutes } = getHourFromY(e.clientY, rect.top);
+          setDragEnd({ hour, minutes });
+        }
+      };
+
+      const handleMouseUp = () => {
+        if (isDragging && dragStart && dragEnd) {
+          const start = new Date(selectedDate);
+          start.setHours(dragStart.hour, dragStart.minutes, 0);
+          
+          const end = new Date(selectedDate);
+          end.setHours(dragEnd.hour, dragEnd.minutes, 0);
+          
+          if (end > start) {
+            const duration = Math.floor((end - start) / 1000);
+            const newActivity = {
+              id: Date.now(),
+              name: 'New Activity',
+              type: 'unclassified',
+              startTime: start.toISOString(),
+              endTime: end.toISOString(),
+              duration: duration,
+              date: selectedDate.toLocaleDateString()
+            };
+            setActivities(prev => [...prev, newActivity]);
+            setEditingActivity(newActivity);
+            setShowEditModal(true);
+            saveToMongoDB(newActivity);
+          }
+        }
+        setIsDragging(false);
+        setDragStart(null);
+        setDragEnd(null);
+      };
+
+      const getTodayActivities = () => {
+        const today = selectedDate.toLocaleDateString();
+        return activities.filter(a => a.date === today).sort((a, b) => 
+          new Date(a.startTime) - new Date(b.startTime)
+        );
+      };
+
+      const getWeekActivities = () => {
+        const today = new Date(selectedDate);
+        const weekAgo = new Date(today);
+        weekAgo.setDate(today.getDate() - 7);
+        
+        return activities.filter(a => {
+          const activityDate = new Date(a.startTime);
+          return activityDate >= weekAgo && activityDate <= today;
+        });
+      };
+
+      const getStats = () => {
+        const relevantActivities = statsView === 'today' ? getTodayActivities() : getWeekActivities();
+        const productive = relevantActivities.filter(a => a.type === 'productive').reduce((sum, a) => sum + (a.duration || 0), 0);
+        const unproductive = relevantActivities.filter(a => a.type === 'unproductive').reduce((sum, a) => sum + (a.duration || 0), 0);
+        const unclassified = relevantActivities.filter(a => a.type === 'unclassified').reduce((sum, a) => sum + (a.duration || 0), 0);
+        const total = productive + unproductive + unclassified;
+
+        return { productive, unproductive, unclassified, total };
+      };
+
+      const updateActivity = (updatedActivity) => {
+        setActivities(prev => prev.map(a => a.id === updatedActivity.id ? updatedActivity : a));
+        saveToMongoDB(updatedActivity);
+        setShowEditModal(false);
+      };
+
+      const deleteActivity = (id) => {
+        setActivities(prev => prev.filter(a => a.id !== id));
+        setShowEditModal(false);
+      };
+
+      const getActivityPosition = (activity) => {
+        const start = new Date(activity.startTime);
+        const hourHeight = 60;
+        const top = start.getHours() * hourHeight + (start.getMinutes() / 60) * hourHeight;
+        const height = (activity.duration / 3600) * hourHeight;
+        return { top, height };
+      };
+
+      const getActivityColor = (type) => {
+        switch(type) {
+          case 'productive': return 'bg-green-600';
+          case 'unproductive': return 'bg-red-600';
+          default: return 'bg-gray-600';
+        }
+      };
+
+      const hours = Array.from({ length: 24 }, (_, i) => i);
+      const stats = getStats();
+
+      return (
+        <div className="min-h-screen bg-gray-900 text-white p-4">
+          <div className="max-w-7xl mx-auto">
+            <div className="mb-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h1 className="text-3xl font-bold mb-2">Productivity Tracker</h1>
+                  <p className="text-gray-400">Track your time with visual timeline</p>
+                </div>
+                <button
+                  onClick={() => setShowMongoConfig(!showMongoConfig)}
+                  className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded hover:bg-gray-700"
+                >
+                  <Database size={18} />
+                  MongoDB
+                </button>
+              </div>
+            </div>
+
+            {showMongoConfig && (
+              <div className="mb-6 bg-gray-800 rounded-lg p-6">
+                <h3 className="text-xl font-bold mb-4">MongoDB Configuration</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">MongoDB Data API URL</label>
+                    <input
+                      type="text"
+                      value={mongoUri}
+                      onChange={(e) => setMongoUri(e.target.value)}
+                      placeholder="https://data.mongodb-api.com/app/your-app/endpoint/data/v1"
+                      className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">API Key</label>
+                    <input
+                      type="password"
+                      value={mongoApiKey}
+                      onChange={(e) => setMongoApiKey(e.target.value)}
+                      placeholder="Your API key"
+                      className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Database</label>
+                      <input
+                        type="text"
+                        value={mongoDb}
+                        onChange={(e) => setMongoDb(e.target.value)}
+                        className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Collection</label>
+                      <input
+                        type="text"
+                        value={mongoCollection}
+                        onChange={(e) => setMongoCollection(e.target.value)}
+                        className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={saveMongoConfig}
+                      className="bg-pink-600 hover:bg-pink-700 px-6 py-2 rounded"
+                    >
+                      Save Config
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 mb-6 border-b border-gray-700">
+              <button
+                onClick={() => setActiveTab('calendar')}
+                className={`px-4 py-2 flex items-center gap-2 ${activeTab === 'calendar' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}
+              >
+                <Calendar size={18} />
+                Timeline
+              </button>
+              <button
+                onClick={() => setActiveTab('pomodoro')}
+                className={`px-4 py-2 flex items-center gap-2 ${activeTab === 'pomodoro' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}
+              >
+                <Clock size={18} />
+                Pomodoro
+              </button>
+              <button
+                onClick={() => setActiveTab('stats')}
+                className={`px-4 py-2 flex items-center gap-2 ${activeTab === 'stats' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}
+              >
+                <BarChart3 size={18} />
+                Statistics
+              </button>
+            </div>
+
+            {activeTab === 'calendar' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          const newDate = new Date(selectedDate);
+                          newDate.setDate(newDate.getDate() - 1);
+                          setSelectedDate(newDate);
+                        }}
+                        className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded"
+                      >
+                        ← Previous
+                      </button>
+                      <button
+                        onClick={() => setSelectedDate(new Date())}
+                        className="bg-pink-600 hover:bg-pink-700 px-4 py-2 rounded"
+                      >
+                        Today
+                      </button>
+                      <button
+                        onClick={() => {
+                          const newDate = new Date(selectedDate);
+                          newDate.setDate(newDate.getDate() + 1);
+                          setSelectedDate(newDate);
+                        }}
+                        className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                    <h2 className="text-xl font-bold">
+                      {selectedDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </h2>
+                  </div>
+
+                  <div className="bg-gray-900 rounded-lg p-4 mb-4">
+                    <p className="text-sm text-gray-400 mb-2">
+                      💡 <strong>Click and drag</strong> on the timeline to create activities. Click activities to edit them.
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Total activities today: {getTodayActivities().length}
+                    </p>
+                  </div>
+
+                  <div 
+                    ref={calendarRef}
+                    className="relative bg-gray-900 rounded overflow-y-auto cursor-crosshair select-none"
+                    style={{ height: '600px' }}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                  >
+                    {hours.map(hour => (
+                      <div 
+                        key={hour} 
+                        className="timeline-hour border-b border-gray-700 relative pointer-events-none"
+                        style={{ height: '60px' }}
+                      >
+                        <div className="absolute left-0 top-0 w-16 text-xs text-gray-500 p-2">
+                          {hour.toString().padStart(2, '0')}:00
+                        </div>
+                        <div className="ml-20 h-full"></div>
+                      </div>
+                    ))}
+
+                    {getTodayActivities().map(activity => {
+                      const { top, height } = getActivityPosition(activity);
+                      return (
+                        <div
+                          key={activity.id}
+                          className={`absolute left-20 right-4 ${getActivityColor(activity.type)} rounded px-3 py-2 cursor-pointer hover:opacity-90 transition-opacity z-10`}
+                          style={{ top: `${top}px`, height: `${height}px`, minHeight: '30px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingActivity(activity);
+                            setShowEditModal(true);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="text-sm font-medium truncate">{activity.name}</div>
+                          <div className="text-xs opacity-75">
+                            {new Date(activity.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - 
+                            {new Date(activity.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {isDragging && dragStart && dragEnd && (
+                      <div
+                        className="absolute left-20 right-4 bg-pink-600 opacity-50 rounded"
+                        style={{
+                          top: `${Math.min(dragStart.hour * 60 + dragStart.minutes, dragEnd.hour * 60 + dragEnd.minutes)}px`,
+                          height: `${Math.abs((dragEnd.hour * 60 + dragEnd.minutes) - (dragStart.hour * 60 + dragStart.minutes))}px`
+                        }}
+                      ></div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-3 gap-4">
+                    <div className="bg-green-900/30 rounded p-3">
+                      <div className="text-sm text-gray-400 mb-1">Productive</div>
+                      <div className="text-xl font-bold text-green-400">
+                        {formatTime(getTodayActivities().filter(a => a.type === 'productive').reduce((sum, a) => sum + (a.duration || 0), 0))}
+                      </div>
+                    </div>
+                    <div className="bg-red-900/30 rounded p-3">
+                      <div className="text-sm text-gray-400 mb-1">Unproductive</div>
+                      <div className="text-xl font-bold text-red-400">
+                        {formatTime(getTodayActivities().filter(a => a.type === 'unproductive').reduce((sum, a) => sum + (a.duration || 0), 0))}
+                      </div>
+                    </div>
+                    <div className="bg-gray-700 rounded p-3">
+                      <div className="text-sm text-gray-400 mb-1">Unclassified</div>
+                      <div className="text-xl font-bold">
+                        {formatTime(getTodayActivities().filter(a => a.type === 'unclassified').reduce((sum, a) => sum + (a.duration || 0), 0))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'pomodoro' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-lg p-8">
+                  <div className="max-w-md mx-auto text-center">
+                    <div className="mb-4">
+                      <div className="text-gray-400 mb-2">{pomodoroMode === 'focus' ? 'Focus Time' : 'Break Time'}</div>
+                      <div className="text-6xl font-mono font-bold mb-8">
+                        {formatPomodoroTime(pomodoroTime)}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-center gap-4 mb-8">
+                      {!pomodoroRunning ? (
+                        <button
+                          onClick={() => {
+                            setPomodoroRunning(true);
+                            setPomodoroSessionStart(new Date());
+                          }}
+                          className="bg-pink-600 hover:bg-pink-700 px-8 py-3 rounded-lg text-lg flex items-center gap-2"
+                        >
+                          <Play size={20} />
+                          Start
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => {
+                              setPomodoroRunning(false);
+                            }}
+                            className="bg-yellow-600 hover:bg-yellow-700 px-6 py-3 rounded-lg text-lg flex items-center gap-2"
+                          >
+                            <Pause size={20} />
+                            Pause
+                          </button>
+                          <button
+                            onClick={handlePomodoroStop}
+                            className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg text-lg flex items-center gap-2"
+                          >
+                            <Square size={20} />
+                            Stop & Log
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={handlePomodoroReset}
+                        className="bg-gray-700 hover:bg-gray-600 px-6 py-3 rounded-lg text-lg flex items-center gap-2"
+                      >
+                        <X size={20} />
+                        Reset
+                      </button>
+                    </div>
+
+                    <div className="border-t border-gray-700 pt-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-gray-400">Focus (min)</label>
+                        <input
+                          type="number"
+                          value={focusDuration}
+                          onChange={(e) => {
+                            setFocusDuration(Number(e.target.value));
+                            if (pomodoroMode === 'focus' && !pomodoroRunning) {
+                              setPomodoroTime(Number(e.target.value) * 60);
+                            }
+                          }}
+                          className="bg-gray-700 rounded px-3 py-1 w-20 text-center outline-none focus:ring-2 focus:ring-pink-500"
+                          disabled={pomodoroRunning}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-gray-400">Break (min)</label>
+                        <input
+                          type="number"
+                          value={breakDuration}
+                          onChange={(e) => {
+                            setBreakDuration(Number(e.target.value));
+                            if (pomodoroMode === 'break' && !pomodoroRunning) {
+                              setPomodoroTime(Number(e.target.value) * 60);
+                            }
+                          }}
+                          className="bg-gray-700 rounded px-3 py-1 w-20 text-center outline-none focus:ring-2 focus:ring-pink-500"
+                          disabled={pomodoroRunning}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'stats' && (
+              <div className="space-y-6">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setStatsView('today')}
+                    className={`px-4 py-2 rounded ${statsView === 'today' ? 'bg-pink-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={() => setStatsView('week')}
+                    className={`px-4 py-2 rounded ${statsView === 'week' ? 'bg-pink-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  >
+                    This Week
+                  </button>
+                </div>
+
+                <div className="bg-gray-800 rounded-lg p-6">
+                  <h2 className="text-xl font-bold mb-4">Activity Breakdown</h2>
+                  <div className="space-y-3">
+                    {(statsView === 'today' ? getTodayActivities() : getWeekActivities())
+                      .sort((a, b) => b.duration - a.duration)
+                      .map(activity => (
+                        <div key={activity.id} className="bg-gray-700 rounded p-4">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-medium">{activity.name}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-gray-400">{formatTime(activity.duration)}</span>
+                              <span className={`px-3 py-1 rounded text-xs ${
+                                activity.type === 'productive' ? 'bg-green-600' : 
+                                activity.type === 'unproductive' ? 'bg-red-600' : 'bg-gray-600'
+                              }`}>
+                                {activity.type}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-sm text-gray-400">
+                            {new Date(activity.startTime).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="bg-gray-800 rounded-lg p-6">
+                  <h2 className="text-xl font-bold mb-4">Distribution</h2>
+                  <div className="flex items-center justify-center gap-12">
+                    <div className="relative w-48 h-48">
+                      <svg viewBox="0 0 100 100" className="transform -rotate-90">
+                        {stats.total > 0 ? (
+                          <>
+                            <circle
+                              cx="50"
+                              cy="50"
+                              r="40"
+                              fill="none"
+                              stroke="#4b5563"
+                              strokeWidth="20"
+                              strokeDasharray={`${(stats.unclassified / stats.total) * 251.2} 251.2`}
+                            />
+                            <circle
+                              cx="50"
+                              cy="50"
+                              r="40"
+                              fill="none"
+                              stroke="#dc2626"
+                              strokeWidth="20"
+                              strokeDasharray={`${(stats.unproductive / stats.total) * 251.2} 251.2`}
+                              strokeDashoffset={`-${(stats.unclassified / stats.total) * 251.2}`}
+                            />
+                            <circle
+                              cx="50"
+                              cy="50"
+                              r="40"
+                              fill="none"
+                              stroke="#16a34a"
+                              strokeWidth="20"
+                              strokeDasharray={`${(stats.productive / stats.total) * 251.2} 251.2`}
+                              strokeDashoffset={`-${((stats.unclassified + stats.unproductive) / stats.total) * 251.2}`}
+                            />
+                          </>
+                        ) : (
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="none"
+                            stroke="#374151"
+                            strokeWidth="20"
+                          />
+                        )}
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold">{formatTime(stats.total)}</div>
+                          <div className="text-xs text-gray-400">Total</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 bg-green-600 rounded"></div>
+                        <div>
+                          <div className="font-medium">Productive</div>
+                          <div className="text-sm text-gray-400">
+                            {formatTime(stats.productive)} ({stats.total > 0 ? Math.round((stats.productive / stats.total) * 100) : 0}%)
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 bg-red-600 rounded"></div>
+                        <div>
+                          <div className="font-medium">Unproductive</div>
+                          <div className="text-sm text-gray-400">
+                            {formatTime(stats.unproductive)} ({stats.total > 0 ? Math.round((stats.unproductive / stats.total) * 100) : 0}%)
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-4 h-4 bg-gray-600 rounded"></div>
+                        <div>
+                          <div className="font-medium">Unclassified</div>
+                          <div className="text-sm text-gray-400">
+                            {formatTime(stats.unclassified)} ({stats.total > 0 ? Math.round((stats.unclassified / stats.total) * 100) : 0}%)
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showEditModal && editingActivity && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold">Edit Activity</h3>
+                    <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white">
+                      <X size={24} />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Description</label>
+                      <input
+                        type="text"
+                        value={editingActivity.name}
+                        onChange={(e) => setEditingActivity({...editingActivity, name: e.target.value})}
+                        className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Classification</label>
+                      <select
+                        value={editingActivity.type}
+                        onChange={(e) => setEditingActivity({...editingActivity, type: e.target.value})}
+                        className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500"
+                      >
+                        <option value="unclassified">Unclassified</option>
+                        <option value="productive">Productive</option>
+                        <option value="unproductive">Unproductive</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">Start Time</label>
+                        <input
+                          type="time"
+                          value={new Date(editingActivity.startTime).toTimeString().slice(0, 5)}
+                          onChange={(e) => {
+                            const newStart = new Date(editingActivity.startTime);
+                            const [hours, minutes] = e.target.value.split(':');
+                            newStart.setHours(parseInt(hours), parseInt(minutes));
+                            setEditingActivity({...editingActivity, startTime: newStart.toISOString()});
+                          }}
+                          className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">End Time</label>
+                        <input
+                          type="time"
+                          value={new Date(editingActivity.endTime).toTimeString().slice(0, 5)}
+                          onChange={(e) => {
+                            const newEnd = new Date(editingActivity.endTime);
+                            const [hours, minutes] = e.target.value.split(':');
+                            newEnd.setHours(parseInt(hours), parseInt(minutes));
+                            const duration = Math.floor((new Date(newEnd) - new Date(editingActivity.startTime)) / 1000);
+                            setEditingActivity({...editingActivity, endTime: newEnd.toISOString(), duration});
+                          }}
+                          className="w-full bg-gray-700 rounded px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-sm text-gray-400">
+                      Duration: {formatTime(editingActivity.duration)}
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={() => updateActivity(editingActivity)}
+                        className="flex-1 bg-pink-600 hover:bg-pink-700 px-4 py-2 rounded flex items-center justify-center gap-2"
+                      >
+                        <Check size={18} />
+                        Save
+                      </button>
+                      <button
+                        onClick={() => deleteActivity(editingActivity.id)}
+                        className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded flex items-center gap-2"
+                      >
+                        <Trash2 size={18} />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<ProductivityTracker />, document.getElementById('root'));
+  </script>
+</body>
+</html>
