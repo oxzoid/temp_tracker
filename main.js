@@ -29,6 +29,9 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
+        frame: false,
+        titleBarStyle: 'hidden',
+        icon: path.join(__dirname, 'icon.ico'),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
@@ -39,7 +42,7 @@ function createWindow() {
     mainWindow.loadFile('index.html');
 
     // Open DevTools to see errors
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
 
     createTray();
 
@@ -148,6 +151,25 @@ ipcMain.on('create-activity', (event, activity) => {
     tracker.addManualActivity(activity);
 });
 
+// Window control handlers
+ipcMain.on('window-minimize', () => {
+    if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.on('window-maximize', () => {
+    if (mainWindow) {
+        if (mainWindow.isMaximized()) {
+            mainWindow.unmaximize();
+        } else {
+            mainWindow.maximize();
+        }
+    }
+});
+
+ipcMain.on('window-close', () => {
+    if (mainWindow) mainWindow.close();
+});
+
 ipcMain.handle('get-activities', async () => {
     return tracker.getAllActivities();
 });
@@ -181,6 +203,18 @@ ipcMain.handle('save-activities', async (event, activities) => {
         return { success: true };
     } catch (error) {
         console.error('Error saving activities:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('clear-all-data', async () => {
+    try {
+        if (tracker && tracker.clearAllData) {
+            return await tracker.clearAllData();
+        }
+        return { success: false, error: 'Tracker not initialized' };
+    } catch (error) {
+        console.error('Error clearing data:', error);
         return { success: false, error: error.message };
     }
 });

@@ -42,6 +42,6 @@
     "mongodb": "^6.21.0"
   },
   "devDependencies": {
-    "electron-builder": "^24.9.0"
+    "electron-builder": "^24.13.3"
   }
 }

@@ -318,6 +318,29 @@ class ScreenTracker {
     return this.activities;
   }
 
+  // Clear all data from local file and MongoDB
+  async clearAllData() {
+    try {
+      // Clear local activities
+      this.activities = [];
+      
+      // Clear local file
+      fs.writeFileSync(this.dataFile, JSON.stringify([], null, 2));
+      console.log('🗑️ Local data file cleared');
+      
+      // Clear MongoDB collection
+      if (this.db) {
+        await this.db.collection('activities').deleteMany({});
+        console.log('🗑️ MongoDB collection cleared');
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error clearing data:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
   getAllActivities() {
     const all = [...this.activities];
     if (this.currentActivity && this.currentActivity.duration > 0) {

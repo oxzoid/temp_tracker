@@ -1383,7 +1383,27 @@
       const hours = Array.from({length: 24}, (_, i) => i);
 
       return (
-        <div className="min-h-screen bg-gray-900 text-white p-4">
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+          {/* Custom Title Bar */}
+          <div className="bg-gray-950 h-10 flex items-center justify-between px-4 select-none" style={{WebkitAppRegion: 'drag'}}>
+            <div className="flex items-center gap-2">
+              <span className="text-pink-500 font-bold">⏱️</span>
+              <span className="text-sm font-medium">Productivity Tracker</span>
+            </div>
+            <div className="flex" style={{WebkitAppRegion: 'no-drag'}}>
+              <button onClick={() => window.electronAPI?.minimizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+              </button>
+              <button onClick={() => window.electronAPI?.maximizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>
+              </button>
+              <button onClick={() => window.electronAPI?.closeWindow()} className="w-10 h-10 hover:bg-red-600 flex items-center justify-center">
+                <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" strokeWidth="1.5"/></svg>
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex-1 p-4 overflow-auto">
           <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h1 className="text-3xl font-bold">Productivity Tracker</h1>
@@ -1437,6 +1457,31 @@
                     ✅ Bidirectional sync: Changes sync to both local file and MongoDB.<br/>
                     ✅ Deletions also sync to MongoDB.
                   </p>
+                  
+                  <div className="mt-6 pt-4 border-t border-gray-700">
+                    <h4 className="text-lg font-semibold text-red-400 mb-3">⚠️ Danger Zone</h4>
+                    <button 
+                      onClick={async () => {
+                        if (confirm('Are you sure you want to delete ALL activities? This will clear both local storage and MongoDB. This cannot be undone!')) {
+                          if (confirm('FINAL WARNING: This will permanently delete all your tracked data. Continue?')) {
+                            if (window.electronAPI && window.electronAPI.clearAllData) {
+                              const result = await window.electronAPI.clearAllData();
+                              if (result.success) {
+                                setActivities([]);
+                                alert('All data cleared successfully!');
+                              } else {
+                                alert('Error clearing data: ' + (result.error || 'Unknown error'));
+                              }
+                            }
+                          }
+                        }
+                      }} 
+                      className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded flex items-center gap-2"
+                    >
+                      <TrashIcon /> Clear All Data
+                    </button>
+                    <p className="text-xs text-gray-500 mt-2">Deletes all activities from local file and MongoDB.</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -1770,6 +1815,7 @@
                 </div>
               </div>
             )}
+          </div>
           </div>
         </div>
       );

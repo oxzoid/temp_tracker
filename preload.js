@@ -31,5 +31,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Sync with MongoDB
     syncMongoDB: () => {
         return ipcRenderer.invoke('sync-mongodb');
-    }
+    },
+
+    // Clear all data (local + MongoDB)
+    clearAllData: () => {
+        return ipcRenderer.invoke('clear-all-data');
+    },
+
+    // Window controls
+    minimizeWindow: () => ipcRenderer.send('window-minimize'),
+    maximizeWindow: () => ipcRenderer.send('window-maximize'),
+    closeWindow: () => ipcRenderer.send('window-close')
 });
