@@ -41,5 +41,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Window controls
     minimizeWindow: () => ipcRenderer.send('window-minimize'),
     maximizeWindow: () => ipcRenderer.send('window-maximize'),
-    closeWindow: () => ipcRenderer.send('window-close')
+    closeWindow: () => ipcRenderer.send('window-close'),
+
+    // Google Calendar
+    gcalAuthorize: () => ipcRenderer.invoke('gcal-authorize'),
+    gcalCompleteAuth: (code) => ipcRenderer.invoke('gcal-complete-auth', code),
+    gcalDisconnect: () => ipcRenderer.invoke('gcal-disconnect'),
+    gcalIsAuthorized: () => ipcRenderer.invoke('gcal-is-authorized'),
+    gcalSyncActivities: (activities) => ipcRenderer.invoke('gcal-sync-activities', activities),
+    gcalCreateEvent: (activity) => ipcRenderer.invoke('gcal-create-event', activity),
+    gcalImportToday: () => ipcRenderer.invoke('gcal-import-today'),
+    gcalSetFirebaseToken: (token) => ipcRenderer.invoke('gcal-set-firebase-token', token),
+    gcalOpenBrowserAuth: () => ipcRenderer.invoke('gcal-open-browser-auth'),
+    onGcalImportedEvents: (callback) => {
+        ipcRenderer.on('gcal-imported-events', (event, activities) => {
+            callback(activities);
+        });
+    },
+    openExternal: (url) => ipcRenderer.send('open-external', url)
 });

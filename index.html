@@ -9,12 +9,21 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
 </head>
 <body>
   <div id="root"></div>
   
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
+
+// Initialize Firebase with config from firebase-config.js
+if (!firebase.apps.length) {
+  firebase.initializeApp(window.firebaseConfig);
+}
+const auth = firebase.auth();
 
     // Simple icon components
     const PlayIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>;
@@ -27,6 +36,7 @@
     const XIcon = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
     const CheckIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>;
     const DatabaseIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>;
+    const CalendarSyncIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>;
 
     // Global utility functions
     const fmt = (s) => {
@@ -39,6 +49,7 @@
     const getColor = (t) => {
       if (t === 'productive') return 'bg-green-600';
       if (t === 'unproductive') return 'bg-red-600';
+      if (t === 'neutral') return 'bg-gray-600';
       return 'bg-gray-600';
     };
 
@@ -63,6 +74,7 @@
         const colors = labels.map(type => {
           if (type === 'productive') return '#10B981';
           if (type === 'unproductive') return '#EF4444';
+          if (type === 'neutral') return '#6B7280';
           return '#6B7280';
         });
         
@@ -94,16 +106,19 @@
         
         const productiveData = [];
         const unproductiveData = [];
+        const neutralData = [];
         const unclassifiedData = [];
         
         weekDays.forEach(day => {
           const dayActivities = activities.filter(a => a.date === day.date);
           const productive = Math.floor(dayActivities.filter(a => a.type === 'productive').reduce((sum, a) => sum + a.duration, 0) / 60);
           const unproductive = Math.floor(dayActivities.filter(a => a.type === 'unproductive').reduce((sum, a) => sum + a.duration, 0) / 60);
+          const neutral = Math.floor(dayActivities.filter(a => a.type === 'neutral').reduce((sum, a) => sum + a.duration, 0) / 60);
           const unclassified = Math.floor(dayActivities.filter(a => a.type === 'unclassified').reduce((sum, a) => sum + a.duration, 0) / 60);
           
           productiveData.push(productive);
           unproductiveData.push(unproductive);
+          neutralData.push(neutral);
           unclassifiedData.push(unclassified);
         });
         
@@ -125,10 +140,17 @@
               borderWidth: 1
             },
             {
-              label: 'Unclassified',
-              data: unclassifiedData,
+              label: 'Neutral',
+              data: neutralData,
               backgroundColor: '#6B7280',
               borderColor: '#6B7280',
+              borderWidth: 1
+            },
+            {
+              label: 'Unclassified',
+              data: unclassifiedData,
+              backgroundColor: '#EF4444',
+              borderColor: '#EF4444',
               borderWidth: 1
             }
           ]
@@ -193,7 +215,7 @@
     };
 
     // Integrated Timeline Component - Drag + Red Block Popups like Toggl
-    const IntegratedTimeline = ({ activities, date, setEditing, setShowModal, addActivity, setActivities }) => {
+    const IntegratedTimeline = ({ activities, date, setEditing, setShowModal, addActivity, setActivities, currentTime }) => {
       const [selectedActivity, setSelectedActivity] = useState(null);
       const [dragging, setDragging] = useState(false);
       const [dragStart, setDragStart] = useState(null);
@@ -315,7 +337,9 @@
               startTime: startDate.toISOString(),
               endTime: endDate.toISOString(),
               windowTitle: 'Manual Entry',
-              description: 'Created by dragging'
+              description: 'Created by dragging',
+              date: date.toLocaleDateString(),
+              source: 'manual'
             };
             
             addActivity(newActivity);
@@ -337,6 +361,10 @@
 
       const totalTracked = today().filter(a => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral').reduce((sum, a) => sum + a.duration, 0);
       const totalUntracked = today().filter(a => a.type === 'untracked' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
+      
+      // Calculate current time position for indicator
+      const isToday = date.toDateString() === new Date().toDateString();
+      const currentTimePos = isToday ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null;
 
       return (
         <div className="bg-gray-900 rounded-lg p-4">
@@ -424,13 +452,32 @@
                     onMouseDown={(e) => e.stopPropagation()}
                   >
                     <div className="h-full flex items-center gap-2">
-                      <span className="text-xs font-medium truncate">{a.name}</span>
+                      <span className="text-xs font-medium truncate">
+                        {a.name}
+                        {a.source === 'google-calendar' && ' 📅'}
+                      </span>
                       {h >= 25 && <span className="text-xs opacity-70 whitespace-nowrap">{fmt(a.duration)}</span>}
                     </div>
                   </div>
                 </React.Fragment>
               );
             })}
+
+            {/* Current Time Indicator - Red line showing current time */}
+            {currentTimePos !== null && (
+              <div 
+                className="absolute left-16 right-4 z-50 pointer-events-none"
+                style={{ top: `${currentTimePos}px` }}
+              >
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-red-500 rounded-full -ml-1.5"></div>
+                  <div className="flex-1 h-0.5 bg-red-500"></div>
+                </div>
+                <div className="absolute -top-6 left-0 bg-red-500 text-white text-xs px-2 py-1 rounded font-mono">
+                  {currentTime.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                </div>
+              </div>
+            )}
 
             {/* Drag preview - purple highlight */}
             {dragging && dragStart && dragEnd && (
@@ -554,1274 +601,1212 @@
                   // TRACKED ACTIVITY - Show edit form directly
                   <>
                     <div className="mb-3">
-                      <h4 className="text-white font-bold text-lg mb-2">EDIT ACTIVITY</h4>
-                    </div>
-
-                    <div className="space-y-3 mb-4">
-                      <div>
-                        <label className="block text-sm text-gray-400 mb-1">Name</label>
-                        <input 
-                          type="text" 
-                          value={selectedActivity.name || ''}
-                          onChange={(e) => setSelectedActivity({...selectedActivity, name: e.target.value})}
-                          className="w-full bg-gray-800 rounded px-3 py-2 text-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm text-gray-400 mb-1">Type</label>
-                        <select 
-                          value={selectedActivity.type || 'productive'}
-                          onChange={(e) => setSelectedActivity({...selectedActivity, type: e.target.value})}
-                          className="w-full bg-gray-800 rounded px-3 py-2 text-white"
-                        >
-                          <option value="productive">Productive (Green)</option>
-                          <option value="unproductive">Unproductive (Orange)</option>
-                          <option value="neutral">Neutral (Gray)</option>
-                        </select>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <label className="block text-sm text-gray-400 mb-1">Start</label>
-                          <input 
-                            type="time" 
-                            value={new Date(selectedActivity.startTime).toTimeString().slice(0,5)}
-                            onChange={(e) => {
-                              const [h, m] = e.target.value.split(':');
-                              const newStart = new Date(selectedActivity.startTime);
-                              newStart.setHours(parseInt(h), parseInt(m));
-                              setSelectedActivity({...selectedActivity, startTime: newStart.toISOString()});
-                            }}
-                            className="w-full bg-gray-800 rounded px-3 py-2 text-white"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-sm text-gray-400 mb-1">End</label>
-                          <input 
-                            type="time" 
-                            value={new Date(selectedActivity.endTime).toTimeString().slice(0,5)}
-                            onChange={(e) => {
-                              const [h, m] = e.target.value.split(':');
-                              const newEnd = new Date(selectedActivity.endTime);
-                              newEnd.setHours(parseInt(h), parseInt(m));
-                              const newDuration = Math.floor((newEnd - new Date(selectedActivity.startTime)) / 1000);
-                              setSelectedActivity({...selectedActivity, endTime: newEnd.toISOString(), duration: Math.max(0, newDuration)});
-                            }}
-                            className="w-full bg-gray-800 rounded px-3 py-2 text-white"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="text-sm text-gray-400">
-                        Duration: {fmt(selectedActivity.duration)}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Create updated activity with all changes
-                          const updatedActivity = {...selectedActivity};
-                          // Update the activity in the list
-                          const updated = activities.map(a => 
-                            a.id === updatedActivity.id ? updatedActivity : a
-                          );
-                          // Save to state (useEffect will save to file)
-                          setActivities(updated);
-                          setSelectedActivity(null);
-                        }}
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition-colors font-bold"
-                      >
-                        Save
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Delete activity from list (useEffect will save to file)
-                          const updated = activities.filter(a => a.id !== selectedActivity.id);
-                          setActivities(updated);
-                          setSelectedActivity(null);
-                        }}
-                        className="px-4 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition-colors"
-                      >
-                        Delete
-                      </button>
-                      <button 
-                        onClick={() => setSelectedActivity(null)}
-                        className="px-4 bg-gray-600 hover:bg-gray-500 text-white py-2 rounded transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Backdrop to close popup */}
-            {selectedActivity && (
-              <div 
-                className="fixed inset-0 bg-black bg-opacity-30 z-35"
-                onClick={() => setSelectedActivity(null)}
-              />
-            )}
-          </div>
-        </div>
-      );
-    };
-
-    // Timeline display component matching Toggl design
-    const TimelineDisplay = ({ activities, date, setEditing, setShowModal }) => {
-      const [selectedActivity, setSelectedActivity] = useState(null);
-
-      // Merge all untracked activities into ONE continuous block
-      const mergeUntracked = (acts) => {
-        const sorted = acts.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-        const merged = [];
-        let untrackedBlock = null;
-        
-        sorted.forEach(act => {
-          // Only merge 'untracked' type - neutral is a classified type and stays separate
-          const isUntracked = act.type === 'untracked' || act.name === 'Untracked';
-          if (isUntracked) {
-            if (!untrackedBlock) {
-              untrackedBlock = {
-                ...act,
-                id: 'merged_untracked',
-                name: 'Untracked',
-                type: 'untracked'
-              };
-            } else {
-              // Extend the untracked block
-              untrackedBlock.endTime = act.endTime;
-              untrackedBlock.duration += act.duration;
-            }
-          } else {
-            if (untrackedBlock) {
-              merged.push(untrackedBlock);
-              untrackedBlock = null;
-            }
-            merged.push(act);
-          }
-        });
-        
-        if (untrackedBlock) {
-          merged.push(untrackedBlock);
-        }
-        
-        return merged;
-      };
-
-      // Filter and sort activities for the day, then merge untracked
-      const dayActivities = mergeUntracked(activities.filter(a => {
-        const actDate = new Date(a.startTime).toLocaleDateString();
-        return actDate === date.toLocaleDateString();
-      }));
-
-      // Generate hour markers for the timeline
-      const generateTimeMarkers = () => {
-        const markers = [];
-        const startHour = dayActivities.length > 0 ? Math.min(6, ...dayActivities.map(a => new Date(a.startTime).getHours())) : 6;
-        const endHour = dayActivities.length > 0 ? Math.max(23, ...dayActivities.map(a => new Date(a.endTime).getHours())) : 23;
-        
-        for (let hour = startHour; hour <= endHour; hour++) {
-          markers.push({
-            time: `${hour.toString().padStart(2, '0')}:00`,
-            position: hour
-          });
-          if (hour < endHour) {
-            markers.push({
-              time: `${hour.toString().padStart(2, '0')}:30`,
-              position: hour + 0.5
-            });
-          }
-        }
-        return markers;
-      };
-
-      // Calculate position of activity on timeline
-      const getActivityPosition = (activity) => {
-        const start = new Date(activity.startTime);
-        const end = new Date(activity.endTime);
-        const startPos = start.getHours() + start.getMinutes() / 60;
-        const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60); // hours
-        return { startPos, duration };
-      };
-
-      const timeMarkers = generateTimeMarkers();
-      const minHour = timeMarkers[0]?.position || 6;
-      const maxHour = timeMarkers[timeMarkers.length - 1]?.position || 23;
-      const totalHours = maxHour - minHour;
-
-      const totalTracked = dayActivities.filter(a => a.type === 'productive' || a.type === 'unproductive' || a.type === 'neutral').reduce((sum, a) => sum + a.duration, 0);
-      const totalUntracked = dayActivities.filter(a => a.type === 'untracked' || a.name === 'Untracked').reduce((sum, a) => sum + a.duration, 0);
-
-      return (
-        <div className="bg-gray-900 rounded-lg p-4">
-          <h3 className="text-lg font-bold mb-4 text-center">Activity Timeline</h3>
-          
-          {/* Summary Stats */}
-          <div className="grid grid-cols-2 gap-4 mb-6 text-center">
-            <div className="bg-gray-800 rounded-lg p-3">
-              <div className="text-green-400 text-lg font-bold">{fmt(totalTracked)}</div>
-              <div className="text-sm text-gray-400">Tracked Time</div>
-            </div>
-            <div className="bg-gray-800 rounded-lg p-3">
-              <div className="text-red-400 text-lg font-bold">{fmt(totalUntracked)}</div>
-              <div className="text-sm text-gray-400">Untracked Time</div>
-            </div>
-          </div>
-          
-          {/* Toggl-style Timeline Grid */}
-          <div className="relative bg-gray-800 rounded-lg p-4 overflow-hidden" style={{ minHeight: `${Math.max(400, totalHours * 60)}px` }}>
-            {/* Time markers */}
-            {timeMarkers.map((marker, index) => (
-              <div
-                key={index}
-                className="absolute left-2 text-gray-400 text-sm font-mono"
-                style={{ 
-                  top: `${((marker.position - minHour) / totalHours) * 100}%`,
-                  transform: 'translateY(-50%)'
-                }}
-              >
-                {marker.time}
-              </div>
-            ))}
-
-            {/* Grid lines */}
-            {timeMarkers.map((marker, index) => (
-              <div
-                key={`line-${index}`}
-                className="absolute left-16 right-4 border-t border-gray-700"
-                style={{ 
-                  top: `${((marker.position - minHour) / totalHours) * 100}%`
-                }}
-              />
-            ))}
-
-            {/* Activity blocks */}
-            {dayActivities.map((activity, index) => {
-              const { startPos, duration } = getActivityPosition(activity);
-              // Only 'untracked' type is red, neutral is gray block
-              const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked';
-              const bgColor = isUntracked ? 'bg-red-600 hover:bg-red-500' : getColor(activity.type).replace('bg-', 'bg-opacity-90 bg-');
-              const top = ((startPos - minHour) / totalHours) * 100;
-              const height = Math.max((duration / totalHours) * 100, 1);
-
-              return (
-                <div
-                  key={activity.id || index}
-                  className={`absolute left-16 right-4 ${bgColor} rounded cursor-pointer transition-all duration-200 ${
-                    selectedActivity?.id === activity.id ? 'ring-2 ring-white z-20' : 'z-10'
-                  }`}
-                  style={{
-                    top: `${top}%`,
-                    height: `${height}%`,
-                    minHeight: '20px'
-                  }}
-                  onClick={() => {
-                    if (isUntracked) {
-                      setSelectedActivity(selectedActivity?.id === activity.id ? null : activity);
-                    } else {
-                      setEditing && setEditing(activity);
-                      setShowModal && setShowModal(true);
-                    }
-                  }}
-                >
-                  <div className="p-2 h-full flex flex-col justify-center overflow-hidden">
-                    <div className="text-white text-sm font-medium truncate">
-                      {isUntracked ? 'Untracked' : activity.name}
-                    </div>
-                    {duration > 0.25 && (
-                      <div className="text-white text-xs opacity-75">
-                        {fmt(activity.duration)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Inline Activity Details Popup - Positioned over the timeline */}
-            {selectedActivity && (
-              <div
-                className="absolute bg-gray-700 rounded-lg p-4 shadow-xl border border-gray-600 z-30"
-                style={{
-                  left: '50%',
-                  top: `${Math.min(((getActivityPosition(selectedActivity).startPos - minHour) / totalHours) * 100, 60)}%`,
-                  width: '320px',
-                  transform: 'translateX(-50%)',
-                  maxHeight: '300px',
-                  overflowY: 'auto'
-                }}
-              >
-                <div className="mb-3">
-                  <h4 className="text-white font-bold mb-2">ACTIVITY</h4>
-                  <p className="text-gray-300 text-sm mb-3">
-                    All data is private, and you choose what you use in your time entries.
-                  </p>
+                      <h4 className="text-white font-bold text-lg mb-2">
+                        {selectedActivity.source === 'google-calendar' ? 'GOOGLE CALENDAR EVENT' : 'EDIT ACTIVITY'}
+                  </h4>
+                  {selectedActivity.source === 'google-calendar' && (
+                    <p className="text-blue-400 text-sm mb-2">📅 Imported from Google Calendar</p>
+                  )}
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-3 mb-4">
                   <div>
-                    <div className="text-white font-bold">
-                      • {fmt(selectedActivity.duration)} {selectedActivity.name || selectedActivity.windowTitle || 'Unknown Application'}
+                    <label className="block text-sm text-gray-400 mb-1">Name</label>
+                    <input 
+                      type="text" 
+                      value={selectedActivity.name || ''}
+                      onChange={(e) => setSelectedActivity({...selectedActivity, name: e.target.value})}
+                      className="w-full bg-gray-800 rounded px-3 py-2 text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Type</label>
+                    <select 
+                      value={selectedActivity.type || 'neutral'}
+                      onChange={(e) => setSelectedActivity({...selectedActivity, type: e.target.value})}
+                      className="w-full bg-gray-800 rounded px-3 py-2 text-white"
+                    >
+                      <option value="productive">Productive (Green)</option>
+                      <option value="unproductive">Unproductive (Orange)</option>
+                      <option value="neutral">Neutral (Gray)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-sm text-gray-400 mb-1">Start</label>
+                      <input 
+                        type="time" 
+                        value={new Date(selectedActivity.startTime).toTimeString().slice(0,5)}
+                        onChange={(e) => {
+                          const [h, m] = e.target.value.split(':');
+                          const newStart = new Date(selectedActivity.startTime);
+                          newStart.setHours(parseInt(h), parseInt(m));
+                          setSelectedActivity({...selectedActivity, startTime: newStart.toISOString()});
+                        }}
+                        className="w-full bg-gray-800 rounded px-3 py-2 text-white"
+                      />
                     </div>
-                    <div className="text-gray-400 text-sm space-y-1 ml-4">
-                      <div>
-                        {new Date(selectedActivity.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} {selectedActivity.windowTitle || selectedActivity.name}
-                      </div>
-                      {selectedActivity.description && (
-                        <div>{selectedActivity.description}</div>
-                      )}
+                    <div className="flex-1">
+                      <label className="block text-sm text-gray-400 mb-1">End</label>
+                      <input 
+                        type="time" 
+                        value={new Date(selectedActivity.endTime).toTimeString().slice(0,5)}
+                        onChange={(e) => {
+                          const [h, m] = e.target.value.split(':');
+                          const newEnd = new Date(selectedActivity.endTime);
+                          newEnd.setHours(parseInt(h), parseInt(m));
+                          const newDuration = Math.floor((newEnd - new Date(selectedActivity.startTime)) / 1000);
+                          setSelectedActivity({...selectedActivity, endTime: newEnd.toISOString(), duration: Math.max(0, newDuration)});
+                        }}
+                        className="w-full bg-gray-800 rounded px-3 py-2 text-white"
+                      />
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-600 pt-3">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-purple-400">Timeframe</span>
-                      <span className="text-purple-400">
-                        {new Date(selectedActivity.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(selectedActivity.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Total time</span>
-                      <span className="text-white">{fmt(selectedActivity.duration)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Active time</span>
-                      <span className="text-white">90%</span>
-                    </div>
+                  <div className="text-sm text-gray-400">
+                    Duration: {fmt(selectedActivity.duration)}
                   </div>
+                </div>
 
+                <div className="flex gap-2">
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
-                      setEditing && setEditing(selectedActivity);
-                      setShowModal && setShowModal(true);
+                      // Create updated activity with all changes
+                      const updatedActivity = {...selectedActivity};
+                      // Update the activity in the list
+                      const updated = activities.map(a => 
+                        a.id === updatedActivity.id ? updatedActivity : a
+                      );
+                      // Save to state (useEffect will save to file)
+                      setActivities(updated);
                       setSelectedActivity(null);
                     }}
-                    className="w-full bg-pink-600 hover:bg-pink-700 text-white py-2 rounded transition-colors"
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition-colors font-bold"
                   >
-                    Copy as time entry
+                    Save
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Delete activity from list (useEffect will save to file)
+                      const updated = activities.filter(a => a.id !== selectedActivity.id);
+                      setActivities(updated);
+                      setSelectedActivity(null);
+                    }}
+                    className="px-4 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition-colors"
+                  >
+                    Delete
+                  </button>
+                  <button 
+                    onClick={() => setSelectedActivity(null)}
+                    className="px-4 bg-gray-600 hover:bg-gray-500 text-white py-2 rounded transition-colors"
+                  >
+                    Cancel
                   </button>
                 </div>
-
-                {/* Close button */}
-                <button
-                  onClick={() => setSelectedActivity(null)}
-                  className="absolute top-2 right-2 text-gray-400 hover:text-white text-lg"
-                >
-                  ×
-                </button>
-              </div>
-            )}
-
-            {/* Click outside to close popup */}
-            {selectedActivity && (
-              <div 
-                className="absolute inset-0 z-5" 
-                onClick={() => setSelectedActivity(null)}
-              />
+              </>
             )}
           </div>
-        </div>
-      );
-    };
+        )}
 
-    const PieChart = ({ data, title }) => {
-      const canvasRef = useRef(null);
-      const chartRef = useRef(null);
+        {/* Backdrop to close popup */}
+        {selectedActivity && (
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-30 z-35"
+            onClick={() => setSelectedActivity(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+const PieChart = ({ data, title }) => {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+  
+  useEffect(() => {
+    if (canvasRef.current && data && data.length > 0) {
+      const ctx = canvasRef.current.getContext('2d');
       
-      useEffect(() => {
-        if (canvasRef.current && data && data.length > 0) {
-          const ctx = canvasRef.current.getContext('2d');
-          
-          if (chartRef.current) {
-            chartRef.current.destroy();
-          }
-          
-          // Calculate total minutes for percentage display
-          const totalSeconds = data.reduce((sum, d) => sum + d.value, 0);
-          
-          // Create labels with minutes shown
-          const labelsWithMinutes = data.map(d => {
-            const mins = Math.round(d.value / 60);
-            const hours = Math.floor(mins / 60);
-            const remainingMins = mins % 60;
-            const timeStr = hours > 0 ? `${hours}h ${remainingMins}m` : `${mins}m`;
-            return `${d.label}: ${timeStr}`;
-          });
-          
-          chartRef.current = new Chart(ctx, {
-            type: 'pie',
-            data: {
-              labels: labelsWithMinutes,
-              datasets: [{
-                data: data.map(d => d.value),
-                backgroundColor: data.map(d => {
-                  // Match colors to category names
-                  if (d.label === 'Productive') return '#22c55e';  // green
-                  if (d.label === 'Unproductive') return '#f97316'; // orange
-                  if (d.label === 'Neutral') return '#6b7280';      // gray
-                  if (d.label === 'Untracked') return '#ef4444';    // red
-                  return '#8b5cf6';                                  // purple fallback
-                }),
-                borderWidth: 1,
-                borderColor: '#374151'
-              }]
+      if (chartRef.current) {
+        chartRef.current.destroy();
+      }
+      
+      // Calculate total minutes for percentage display
+      const totalSeconds = data.reduce((sum, d) => sum + d.value, 0);
+      
+      // Create labels with minutes shown
+      const labelsWithMinutes = data.map(d => {
+        const mins = Math.round(d.value / 60);
+        const hours = Math.floor(mins / 60);
+        const remainingMins = mins % 60;
+        const timeStr = hours > 0 ? `${hours}h ${remainingMins}m` : `${mins}m`;
+        return `${d.label}: ${timeStr}`;
+      });
+      
+      chartRef.current = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: labelsWithMinutes,
+          datasets: [{
+            data: data.map(d => d.value),
+            backgroundColor: data.map(d => {
+              // Match colors to category names
+              if (d.label === 'Productive') return '#22c55e';  // green
+              if (d.label === 'Unproductive') return '#f97316'; // orange
+              if (d.label === 'Neutral') return '#6b7280';      // gray
+              if (d.label === 'Untracked') return '#ef4444';    // red
+              return '#8b5cf6';                                  // purple fallback
+            }),
+            borderWidth: 1,
+            borderColor: '#374151'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: title,
+              color: '#fff',
+              font: { size: 16 }
             },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                title: {
-                  display: true,
-                  text: title,
-                  color: '#fff',
-                  font: { size: 16 }
-                },
-                legend: {
-                  position: 'bottom',
-                  labels: {
-                    color: '#fff',
-                    padding: 15,
-                    font: { size: 12 }
-                  }
-                },
-                tooltip: {
-                  callbacks: {
-                    label: function(context) {
-                      const mins = Math.round(context.raw / 60);
-                      const hours = Math.floor(mins / 60);
-                      const remainingMins = mins % 60;
-                      const timeStr = hours > 0 ? `${hours}h ${remainingMins}m` : `${mins}m`;
-                      const percentage = totalSeconds > 0 ? Math.round((context.raw / totalSeconds) * 100) : 0;
-                      return `${timeStr} (${percentage}%)`;
-                    }
-                  }
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: '#fff',
+                padding: 15,
+                font: { size: 12 }
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const mins = Math.round(context.raw / 60);
+                  const hours = Math.floor(mins / 60);
+                  const remainingMins = mins % 60;
+                  const timeStr = hours > 0 ? `${hours}h ${remainingMins}m` : `${mins}m`;
+                  const percentage = totalSeconds > 0 ? Math.round((context.raw / totalSeconds) * 100) : 0;
+                  return `${timeStr} (${percentage}%)`;
                 }
               }
             }
-          });
-        }
-        
-        return () => {
-          if (chartRef.current) {
-            chartRef.current.destroy();
           }
-        };
-      }, [data, title]);
+        }
+      });
+    }
+    
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy();
+      }
+    };
+  }, [data, title]);
+  
+  // Show message if no data
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-64 flex flex-col items-center justify-center text-gray-400">
+        <div className="text-lg font-bold mb-2">{title}</div>
+        <div>No activity data</div>
+      </div>
+    );
+  }
+  
+  return <div className="h-64"><canvas ref={canvasRef}></canvas></div>;
+};
+
+const App = () => {
+  const [tab, setTab] = useState('calendar');
+  const [activities, setActivities] = useState([]);
+  const [date, setDate] = useState(new Date());
+  const [dragStart, setDragStart] = useState(null);
+  const [dragEnd, setDragEnd] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  
+  // Initialize from localStorage to preserve user's custom settings
+  const [focusMin, setFocusMin] = useState(() => {
+    const saved = localStorage.getItem('defaultFocusMin');
+    return saved !== null ? Number(saved) : 25;
+  });
+  const [breakMin, setBreakMin] = useState(() => {
+    const saved = localStorage.getItem('defaultBreakMin');
+    return saved !== null ? Number(saved) : 5;
+  });
+  const [pomoTime, setPomoTime] = useState(() => {
+    const saved = localStorage.getItem('defaultFocusMin');
+    return saved !== null ? Number(saved) * 60 : 25 * 60;
+  });
+  const [pomoMode, setPomoMode] = useState('focus');
+  const [pomoRunning, setPomoRunning] = useState(false);
+  const [pomoStart, setPomoStart] = useState(null);
+  const [pomoType, setPomoType] = useState('productive'); // New state for classifying pomodoro
+  const [pomoTitle, setPomoTitle] = useState('Pomodoro Session'); // Custom title for pomodoro
+  
+  const [showMongo, setShowMongo] = useState(false);
+  const [mongoUri, setMongoUri] = useState(localStorage.getItem('mongoUri') || '');
+  const [mongoKey, setMongoKey] = useState(localStorage.getItem('mongoKey') || '');
+  const [mongoDb, setMongoDb] = useState(localStorage.getItem('mongoDb') || 'productivity_tracker');
+  const [mongoColl, setMongoColl] = useState(localStorage.getItem('mongoColl') || 'activities');
+  
+  // Google Calendar state
+  const [showGCal, setShowGCal] = useState(false);
+  const [gcalAuthorized, setGcalAuthorized] = useState(false);
+  const [gcalAuthUrl, setGcalAuthUrl] = useState('');
+  const [gcalAuthCode, setGcalAuthCode] = useState('');
+  const [gcalSyncing, setGcalSyncing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  
+  const calRef = useRef(null);
+  const pomoRef = useRef(null);
+
+  // Data persistence - ONLY use file via Electron, no localStorage
+  useEffect(() => {
+    // Clear any old localStorage/sessionStorage data to prevent conflicts
+    try {
+      localStorage.removeItem('acts');
+      sessionStorage.removeItem('acts_backup');
+    } catch(e) {}
+    
+    // Helper to deduplicate activities
+    const deduplicateActivities = (acts) => {
+      const seen = new Set();
+      return acts.filter(a => {
+        const key = `${a.startTime}_${a.endTime}_${a.name}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    
+    // Load ONLY from Electron file (activities-data.json)
+    if (window.electronAPI) {
+      window.electronAPI.getActivities().then(fileActivities => {
+        if (fileActivities && fileActivities.length > 0) {
+          const deduplicated = deduplicateActivities(fileActivities);
+          setActivities(deduplicated);
+        }
+      }).catch(err => console.log('Could not load activities:', err));
+    }
+  }, []);
+
+  // Save to file whenever activities change
+  useEffect(() => {
+    if (activities.length > 0 && window.electronAPI && window.electronAPI.saveActivities) {
+      window.electronAPI.saveActivities(activities);
+    }
+  }, [activities]);
+
+  useEffect(() => {
+    if (pomoRunning && pomoTime > 0) {
+      pomoRef.current = setInterval(() => {
+        setPomoTime(p => {
+          const newTime = p <= 1 ? 0 : p - 1;
+          // Save Pomodoro state periodically
+          localStorage.setItem('pomoState', JSON.stringify({
+            time: newTime,
+            mode: pomoMode,
+            running: pomoRunning,
+            start: pomoStart,
+            type: pomoType,
+            title: pomoTitle
+          }));
+          
+          if (p <= 1) {
+            pomoComplete();
+            return 0;
+          }
+          return newTime;
+        });
+      }, 1000);
+    } else {
+      clearInterval(pomoRef.current);
+    }
+    return () => clearInterval(pomoRef.current);
+  }, [pomoRunning, pomoTime]);
+
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.onScreenActivities((acts) => {
+        setActivities(prev => {
+          const merged = [...prev];
+          acts.forEach(a => {
+            if (!merged.find(x => x.id === a.id)) merged.push(a);
+          });
+          return merged.sort((a,b) => new Date(b.startTime) - new Date(a.startTime));
+        });
+      });
       
-      // Show message if no data
-      if (!data || data.length === 0) {
-        return (
-          <div className="h-64 flex flex-col items-center justify-center text-gray-400">
-            <div className="text-lg font-bold mb-2">{title}</div>
-            <div>No activity data</div>
-          </div>
-        );
+      window.electronAPI.getActivities().then(acts => {
+        if (acts.length > 0) setActivities(acts);
+      });
+      
+      // Send MongoDB config to Electron
+      if (mongoUri) {
+        window.electronAPI.setMongoConfig({ uri: mongoUri, database: mongoDb });
       }
       
-      return <div className="h-64"><canvas ref={canvasRef}></canvas></div>;
-    };
-
-    const App = () => {
-      const [tab, setTab] = useState('calendar');
-      const [activities, setActivities] = useState([]);
-      const [date, setDate] = useState(new Date());
-      const [dragStart, setDragStart] = useState(null);
-      const [dragEnd, setDragEnd] = useState(null);
-      const [dragging, setDragging] = useState(false);
-      const [editing, setEditing] = useState(null);
-      const [showModal, setShowModal] = useState(false);
-      
-      // Initialize from localStorage to preserve user's custom settings
-      const [focusMin, setFocusMin] = useState(() => {
-        const saved = localStorage.getItem('defaultFocusMin');
-        return saved !== null ? Number(saved) : 25;
+      // Check Google Calendar authorization status
+      window.electronAPI.gcalIsAuthorized().then(result => {
+        setGcalAuthorized(result.authorized);
+      }).catch(err => {
+        console.log('Could not check Google Calendar status:', err);
+        setGcalAuthorized(false);
       });
-      const [breakMin, setBreakMin] = useState(() => {
-        const saved = localStorage.getItem('defaultBreakMin');
-        return saved !== null ? Number(saved) : 5;
-      });
-      const [pomoTime, setPomoTime] = useState(() => {
-        const saved = localStorage.getItem('defaultFocusMin');
-        return saved !== null ? Number(saved) * 60 : 25 * 60;
-      });
-      const [pomoMode, setPomoMode] = useState('focus');
-      const [pomoRunning, setPomoRunning] = useState(false);
-      const [pomoStart, setPomoStart] = useState(null);
-      const [pomoType, setPomoType] = useState('productive'); // New state for classifying pomodoro
-      const [pomoTitle, setPomoTitle] = useState('Pomodoro Session'); // Custom title for pomodoro
       
-      const [showMongo, setShowMongo] = useState(false);
-      const [mongoUri, setMongoUri] = useState(localStorage.getItem('mongoUri') || '');
-      const [mongoKey, setMongoKey] = useState(localStorage.getItem('mongoKey') || '');
-      const [mongoDb, setMongoDb] = useState(localStorage.getItem('mongoDb') || 'productivity_tracker');
-      const [mongoColl, setMongoColl] = useState(localStorage.getItem('mongoColl') || 'activities');
-      
-      const calRef = useRef(null);
-      const pomoRef = useRef(null);
-
-      // Data persistence - ONLY use file via Electron, no localStorage
-      useEffect(() => {
-        // Clear any old localStorage/sessionStorage data to prevent conflicts
-        try {
-          localStorage.removeItem('acts');
-          sessionStorage.removeItem('acts_backup');
-        } catch(e) {}
-        
-        // Helper to deduplicate activities
-        const deduplicateActivities = (acts) => {
-          const seen = new Set();
-          return acts.filter(a => {
-            const key = `${a.startTime}_${a.endTime}_${a.name}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
+      // Listen for imported Google Calendar events
+      window.electronAPI.onGcalImportedEvents((newActivities) => {
+        console.log('📥 Received', newActivities.length, 'events from Google Calendar');
+        setActivities(prev => {
+          const merged = [...prev];
+          newActivities.forEach(a => {
+            // Only add if not already present
+            if (!merged.find(x => x.id === a.id)) {
+              merged.push(a);
+            }
           });
+          return merged.sort((a,b) => new Date(b.startTime) - new Date(a.startTime));
+        });
+      });
+    }
+    
+    // Update current time every minute for timeline indicator
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000); // Update every minute (60000ms)
+    
+    return () => clearInterval(timeInterval);
+  }, []);
+
+  const saveMongo = () => {
+    localStorage.setItem('mongoUri', mongoUri);
+    localStorage.setItem('mongoKey', mongoKey);
+    localStorage.setItem('mongoDb', mongoDb);
+    localStorage.setItem('mongoColl', mongoColl);
+    setShowMongo(false);
+    
+    if (window.electronAPI && mongoUri) {
+      window.electronAPI.setMongoConfig({ uri: mongoUri, database: mongoDb });
+    }
+  };
+
+  // Google Calendar functions
+const connectGoogleCalendar = async () => {
+  try {
+    // Firebase Google Sign-In with Calendar scope
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/calendar');
+    
+    const result = await auth.signInWithPopup(provider);
+    const credential = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+    
+    if (!credential || !credential.accessToken) {
+      throw new Error('Failed to get access token from Google sign-in');
+    }
+    
+    const token = credential.accessToken;
+    
+    // Send token to Electron
+    const authResult = await window.electronAPI.gcalSetFirebaseToken(token);
+    
+    if (authResult.success) {
+      setGcalAuthorized(true);
+      alert('✅ Google Calendar connected! Auto-sync started.');
+      
+      // Trigger initial import
+      const importResult = await window.electronAPI.gcalImportToday();
+      if (importResult.success && importResult.activities) {
+        setActivities(prev => {
+          const merged = [...prev];
+          importResult.activities.forEach(a => {
+            if (!merged.find(x => x.id === a.id)) {
+              merged.push(a);
+            }
+          });
+          return merged.sort((a,b) => new Date(b.startTime) - new Date(a.startTime));
+        });
+      }
+    } else {
+      alert('Error: ' + authResult.error);
+    }
+  } catch (error) {
+    console.error('Firebase auth error:', error);
+    alert('Error: ' + error.message);
+  }
+};
+  const disconnectGoogleCalendar = async () => {
+    const result = await window.electronAPI.gcalDisconnect();
+    if (result.success) {
+      setGcalAuthorized(false);
+      alert('Disconnected from Google Calendar');
+    }
+  };
+
+  const syncToGoogleCalendar = async (selectedActivities) => {
+    if (!gcalAuthorized) {
+      alert('Please connect to Google Calendar first');
+      return;
+    }
+    
+    setGcalSyncing(true);
+    const activitiesToSync = selectedActivities || activities.filter(a => a.type !== 'untracked' && a.type !== 'unclassified' && a.endTime);
+    
+    const result = await window.electronAPI.gcalSyncActivities(activitiesToSync);
+    setGcalSyncing(false);
+    
+    if (result.success) {
+      alert(`✅ Synced ${result.results.success} activities to Google Calendar!\n⏭️ Skipped: ${result.results.skipped} (already from Calendar)\n❌ Failed: ${result.results.failed}`);
+    } else {
+      alert('Error: ' + result.error);
+    }
+  };
+
+  const pomoComplete = () => {
+    setPomoRunning(false);
+    if (pomoMode === 'focus' && pomoStart) {
+      const end = new Date();
+      const dur = Math.floor((end - pomoStart) / 1000);
+      
+      // Create completed Pomodoro activity
+      const act = {
+        id: Date.now(),
+        name: pomoTitle || 'Pomodoro Session',
+        type: pomoType,
+        startTime: pomoStart.toISOString(),
+        endTime: end.toISOString(),
+        duration: dur,
+        date: pomoStart.toLocaleDateString(),
+        source: 'pomodoro'
+      };
+      
+      // Add to activities and explicitly save
+      setActivities(prev => {
+        const updated = [...prev, act];
+        // Explicitly save to file
+        if (window.electronAPI && window.electronAPI.saveActivities) {
+          window.electronAPI.saveActivities(updated);
+        }
+        return updated;
+      });
+      
+      console.log('🍅 Pomodoro saved:', act.name, dur, 'seconds');
+    }
+    setPomoStart(null);
+    const nextMode = pomoMode === 'focus' ? 'break' : 'focus';
+    setPomoMode(nextMode);
+    const nextTime = (nextMode === 'focus' ? focusMin : breakMin) * 60;
+    setPomoTime(nextTime);
+  };
+
+  const pomoStop = () => {
+    if (pomoStart) {
+      const end = new Date();
+      const dur = Math.floor((end - pomoStart) / 1000);
+      if (dur > 5) {
+        const act = {
+          id: Date.now(),
+          name: `Pomodoro (Stopped) - ${pomoType}`,
+          type: pomoType,
+          startTime: pomoStart.toISOString(),
+          endTime: end.toISOString(),
+          duration: dur,
+          date: pomoStart.toLocaleDateString(),
+          source: 'pomodoro'
         };
         
-        // Load ONLY from Electron file (activities-data.json)
-        if (window.electronAPI) {
-          window.electronAPI.getActivities().then(fileActivities => {
-            if (fileActivities && fileActivities.length > 0) {
-              const deduplicated = deduplicateActivities(fileActivities);
-              setActivities(deduplicated);
-            }
-          }).catch(err => console.log('Could not load activities:', err));
-        }
-      }, []);
-
-      // Save to file whenever activities change
-      useEffect(() => {
-        if (activities.length > 0 && window.electronAPI && window.electronAPI.saveActivities) {
-          window.electronAPI.saveActivities(activities);
-        }
-      }, [activities]);
-
-      useEffect(() => {
-        if (pomoRunning && pomoTime > 0) {
-          pomoRef.current = setInterval(() => {
-            setPomoTime(p => {
-              const newTime = p <= 1 ? 0 : p - 1;
-              // Save Pomodoro state periodically
-              localStorage.setItem('pomoState', JSON.stringify({
-                time: newTime,
-                mode: pomoMode,
-                running: pomoRunning,
-                start: pomoStart,
-                type: pomoType,
-                title: pomoTitle
-              }));
-              
-              if (p <= 1) {
-                pomoComplete();
-                return 0;
-              }
-              return newTime;
-            });
-          }, 1000);
-        } else {
-          clearInterval(pomoRef.current);
-        }
-        return () => clearInterval(pomoRef.current);
-      }, [pomoRunning, pomoTime]);
-
-      useEffect(() => {
-        if (window.electronAPI) {
-          window.electronAPI.onScreenActivities((acts) => {
-            setActivities(prev => {
-              const merged = [...prev];
-              acts.forEach(a => {
-                if (!merged.find(x => x.id === a.id)) merged.push(a);
-              });
-              return merged.sort((a,b) => new Date(b.startTime) - new Date(a.startTime));
-            });
-          });
-          
-          window.electronAPI.getActivities().then(acts => {
-            if (acts.length > 0) setActivities(acts);
-          });
-          
-          // Send MongoDB config to Electron
-          if (mongoUri) {
-            window.electronAPI.setMongoConfig({ uri: mongoUri, database: mongoDb });
+        // Add and explicitly save
+        setActivities(prev => {
+          const updated = [...prev, act];
+          if (window.electronAPI && window.electronAPI.saveActivities) {
+            window.electronAPI.saveActivities(updated);
           }
-        }
-      }, []);
-
-      const saveMongo = () => {
-        localStorage.setItem('mongoUri', mongoUri);
-        localStorage.setItem('mongoKey', mongoKey);
-        localStorage.setItem('mongoDb', mongoDb);
-        localStorage.setItem('mongoColl', mongoColl);
-        setShowMongo(false);
-        
-        if (window.electronAPI && mongoUri) {
-          window.electronAPI.setMongoConfig({ uri: mongoUri, database: mongoDb });
-        }
-      };
-
-      const pomoComplete = () => {
-        setPomoRunning(false);
-        if (pomoMode === 'focus' && pomoStart) {
-          const end = new Date();
-          const dur = Math.floor((end - pomoStart) / 1000);
-          
-          // Create completed Pomodoro activity
-          const act = {
-            id: Date.now(),
-            name: pomoTitle || 'Pomodoro Session',
-            type: pomoType,
-            startTime: pomoStart.toISOString(),
-            endTime: end.toISOString(),
-            duration: dur,
-            date: pomoStart.toLocaleDateString(),
-            source: 'pomodoro'
-          };
-          
-          // Add to activities and explicitly save
-          setActivities(prev => {
-            const updated = [...prev, act];
-            // Explicitly save to file
-            if (window.electronAPI && window.electronAPI.saveActivities) {
-              window.electronAPI.saveActivities(updated);
-            }
-            return updated;
-          });
-          
-          console.log('🍅 Pomodoro saved:', act.name, dur, 'seconds');
-        }
-        setPomoStart(null);
-        const nextMode = pomoMode === 'focus' ? 'break' : 'focus';
-        setPomoMode(nextMode);
-        const nextTime = (nextMode === 'focus' ? focusMin : breakMin) * 60;
-        setPomoTime(nextTime);
-      };
-
-      const pomoStop = () => {
-        if (pomoStart) {
-          const end = new Date();
-          const dur = Math.floor((end - pomoStart) / 1000);
-          if (dur > 5) {
-            const act = {
-              id: Date.now(),
-              name: `Pomodoro (Stopped) - ${pomoType}`,
-              type: pomoType,
-              startTime: pomoStart.toISOString(),
-              endTime: end.toISOString(),
-              duration: dur,
-              date: pomoStart.toLocaleDateString(),
-              source: 'pomodoro'
-            };
-            
-            // Add and explicitly save
-            setActivities(prev => {
-              const updated = [...prev, act];
-              if (window.electronAPI && window.electronAPI.saveActivities) {
-                window.electronAPI.saveActivities(updated);
-              }
-              return updated;
-            });
-            
-            console.log('🍅 Pomodoro (stopped) saved:', act.name, dur, 'seconds');
-          }
-        }
-        setPomoRunning(false);
-        setPomoStart(null);
-        setPomoMode('focus');
-        setPomoTime(focusMin * 60);
-      };
-
-      const fmtPomo = (s) => {
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return `${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
-      };
-
-      const getHour = (y, top) => {
-        const rel = y - top;
-        const h = Math.floor(rel / 60);
-        const m = Math.floor((rel % 60) / 60 * 60);
-        return { h, m };
-      };
-
-      const onDown = (e) => {
-        const rect = calRef.current.getBoundingClientRect();
-        const {h, m} = getHour(e.clientY, rect.top);
-        setDragStart({h, m});
-        setDragging(true);
-        e.preventDefault();
-      };
-
-      const onMove = (e) => {
-        if (dragging && dragStart) {
-          const rect = calRef.current.getBoundingClientRect();
-          const {h, m} = getHour(e.clientY, rect.top);
-          setDragEnd({h, m});
-        }
-      };
-
-      const onUp = () => {
-        if (dragging && dragStart && dragEnd) {
-          const start = new Date(date);
-          start.setHours(dragStart.h, dragStart.m, 0);
-          const end = new Date(date);
-          end.setHours(dragEnd.h, dragEnd.m, 0);
-          
-          if (end > start) {
-            const dur = Math.floor((end - start) / 1000);
-            const act = {
-              id: Date.now(),
-              name: 'New Activity',
-              type: 'productive',
-              startTime: start.toISOString(),
-              endTime: end.toISOString(),
-              duration: dur,
-              date: date.toLocaleDateString()
-            };
-            setActivities(p => [...p, act]);
-            setEditing(act);
-            setShowModal(true);
-          }
-        }
-        setDragging(false);
-        setDragStart(null);
-        setDragEnd(null);
-      };
-
-      // Merge continuous untracked activities into ONE continuous block
-      const mergeUntrackedActivities = (activities) => {
-        const sorted = activities.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-        const merged = [];
-        let currentUntrackedGroup = null;
-        
-        sorted.forEach(activity => {
-          // Only 'untracked' type or activities with no type at all
-          const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked' || (!activity.type && activity.source === 'auto-tracked');
-          
-          if (isUntracked) {
-            if (!currentUntrackedGroup) {
-              // Start new continuous untracked block
-              currentUntrackedGroup = {
-                ...activity,
-                id: 'continuous_untracked_' + Date.now(),
-                name: 'Untracked',
-                originalStart: activity.startTime
-              };
-            } else {
-              // Always merge - create ONE continuous block
-              currentUntrackedGroup.endTime = activity.endTime;
-              currentUntrackedGroup.duration += activity.duration;
-            }
-          } else {
-            // Regular activity - finish current untracked group if exists
-            if (currentUntrackedGroup) {
-              merged.push(currentUntrackedGroup);
-              currentUntrackedGroup = null;
-            }
-            merged.push(activity);
-          }
+          return updated;
         });
         
-        // Add final continuous untracked block if exists
+        console.log('🍅 Pomodoro (stopped) saved:', act.name, dur, 'seconds');
+      }
+    }
+    setPomoRunning(false);
+    setPomoStart(null);
+    setPomoMode('focus');
+    setPomoTime(focusMin * 60);
+  };
+
+  const fmtPomo = (s) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+  };
+
+  const getHour = (y, top) => {
+    const rel = y - top;
+    const h = Math.floor(rel / 60);
+    const m = Math.floor((rel % 60) / 60 * 60);
+    return { h, m };
+  };
+
+  const onDown = (e) => {
+    const rect = calRef.current.getBoundingClientRect();
+    const {h, m} = getHour(e.clientY, rect.top);
+    setDragStart({h, m});
+    setDragging(true);
+    e.preventDefault();
+  };
+
+  const onMove = (e) => {
+    if (dragging && dragStart) {
+      const rect = calRef.current.getBoundingClientRect();
+      const {h, m} = getHour(e.clientY, rect.top);
+      setDragEnd({h, m});
+    }
+  };
+
+  const onUp = () => {
+    if (dragging && dragStart && dragEnd) {
+      const start = new Date(date);
+      start.setHours(dragStart.h, dragStart.m, 0);
+      const end = new Date(date);
+      end.setHours(dragEnd.h, dragEnd.m, 0);
+      
+      if (end > start) {
+        const dur = Math.floor((end - start) / 1000);
+        const act = {
+          id: Date.now(),
+          name: 'New Activity',
+          type: 'productive',
+          startTime: start.toISOString(),
+          endTime: end.toISOString(),
+          duration: dur,
+          date: date.toLocaleDateString(),
+          source: 'manual'
+        };
+        setActivities(p => [...p, act]);
+        setEditing(act);
+        setShowModal(true);
+      }
+    }
+    setDragging(false);
+    setDragStart(null);
+    setDragEnd(null);
+  };
+
+  // Merge continuous untracked activities into ONE continuous block
+  const mergeUntrackedActivities = (activities) => {
+    const sorted = activities.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    const merged = [];
+    let currentUntrackedGroup = null;
+    
+    sorted.forEach(activity => {
+      // Only 'untracked' type or activities with no type at all
+      const isUntracked = activity.type === 'untracked' || activity.name === 'Untracked' || (!activity.type && activity.source === 'auto-tracked');
+      
+      if (isUntracked) {
+        if (!currentUntrackedGroup) {
+          // Start new continuous untracked block
+          currentUntrackedGroup = {
+            ...activity,
+            id: 'continuous_untracked_' + Date.now(),
+            name: 'Untracked',
+            originalStart: activity.startTime
+          };
+        } else {
+          // Always merge - create ONE continuous block
+          currentUntrackedGroup.endTime = activity.endTime;
+          currentUntrackedGroup.duration += activity.duration;
+        }
+      } else {
+        // Regular activity - finish current untracked group if exists
         if (currentUntrackedGroup) {
           merged.push(currentUntrackedGroup);
+          currentUntrackedGroup = null;
         }
-        
-        return merged;
-      };
+        merged.push(activity);
+      }
+    });
+    
+    // Add final continuous untracked block if exists
+    if (currentUntrackedGroup) {
+      merged.push(currentUntrackedGroup);
+    }
+    
+    return merged;
+  };
 
-      const today = () => {
-        const td = date.toLocaleDateString();
-        const dayActivities = activities.filter(a => {
-          const activityDate = a.date || new Date(a.startTime).toLocaleDateString();
-          return activityDate === td;
-        });
-        return mergeUntrackedActivities(dayActivities);
-      };
+  const today = () => {
+    const td = date.toLocaleDateString();
+    const dayActivities = activities.filter(a => {
+      const activityDate = a.date || new Date(a.startTime).toLocaleDateString();
+      return activityDate === td;
+    });
+    return mergeUntrackedActivities(dayActivities);
+  };
 
-      const getPos = (a) => {
-        const start = new Date(a.startTime);
-        const top = start.getHours() * 60 + (start.getMinutes() / 60) * 60;
-        
-        // For untracked activities, use a very small fixed height
-        // neutral type = classified gray block, gets full height
-        const isUntracked = a.type === 'untracked' || a.name === 'Untracked';
-        if (isUntracked) {
-          return { top, h: 12 }; // Very small rectangle - 12px height
-        }
-        
-        // For regular activities (including neutral), use proportional height
-        const h = Math.max(30, (a.duration / 3600) * 60);
-        return { top, h };
-      };
+  const getPos = (a) => {
+    const start = new Date(a.startTime);
+    const top = start.getHours() * 60 + (start.getMinutes() / 60) * 60;
+    
+    // For untracked activities, use a very small fixed height
+    // neutral type = classified gray block, gets full height
+    const isUntracked = a.type === 'untracked' || a.name === 'Untracked';
+    if (isUntracked) {
+      return { top, h: 12 }; // Very small rectangle - 12px height
+    }
+    
+    // For regular activities (including neutral), use proportional height
+    const h = Math.max(30, (a.duration / 3600) * 60);
+    return { top, h };
+  };
 
-      const update = (a) => {
-        const updated = activities.map(x => x.id === a.id ? a : x);
-        setActivities(updated);
-        setShowModal(false);
-        
-        // File save happens automatically via useEffect
-      };
+  const update = (a) => {
+    const updated = activities.map(x => x.id === a.id ? a : x);
+    setActivities(updated);
+    setShowModal(false);
+    
+    // File save happens automatically via useEffect
+  };
 
-      const del = (id) => {
-        setActivities(p => p.filter(a => a.id !== id));
-        setShowModal(false);
-      };
+  const del = (id) => {
+    setActivities(p => p.filter(a => a.id !== id));
+    setShowModal(false);
+  };
 
-      const addActivity = (activity) => {
-        const updated = [...activities, activity];
-        setActivities(updated);
-        // File save happens automatically via useEffect
-      };
+  const addActivity = (activity) => {
+    const updated = [...activities, activity];
+    setActivities(updated);
+    // File save happens automatically via useEffect
+  };
 
-      const hours = Array.from({length: 24}, (_, i) => i);
+  const hours = Array.from({length: 24}, (_, i) => i);
 
-      return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-          {/* Custom Title Bar */}
-          <div className="bg-gray-950 h-10 flex items-center justify-between px-4 select-none" style={{WebkitAppRegion: 'drag'}}>
-            <div className="flex items-center gap-2">
-              <span className="text-pink-500 font-bold">⏱️</span>
-              <span className="text-sm font-medium">Productivity Tracker</span>
-            </div>
-            <div className="flex" style={{WebkitAppRegion: 'no-drag'}}>
-              <button onClick={() => window.electronAPI?.minimizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
-                <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
-              </button>
-              <button onClick={() => window.electronAPI?.maximizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
-                <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>
-              </button>
-              <button onClick={() => window.electronAPI?.closeWindow()} className="w-10 h-10 hover:bg-red-600 flex items-center justify-center">
-                <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" strokeWidth="1.5"/></svg>
-              </button>
-            </div>
-          </div>
-          
-          <div className="flex-1 p-4 overflow-auto">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h1 className="text-3xl font-bold">Productivity Tracker</h1>
-              <button onClick={() => setShowMongo(!showMongo)} className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded hover:bg-gray-700">
-                <DatabaseIcon /> MongoDB
-              </button>
-            </div>
-
-            {showMongo && (
-              <div className="mb-6 bg-gray-800 rounded-lg p-6">
-                <h3 className="text-xl font-bold mb-4">MongoDB Configuration</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">MongoDB Connection String</label>
-                    <input type="text" value={mongoUri} onChange={(e) => setMongoUri(e.target.value)} placeholder="mongodb+srv://..." className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Database</label>
-                      <input type="text" value={mongoDb} onChange={(e) => setMongoDb(e.target.value)} className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Collection</label>
-                      <input type="text" value={mongoColl} onChange={(e) => setMongoColl(e.target.value)} className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={saveMongo} className="bg-pink-600 hover:bg-pink-700 px-6 py-2 rounded">
-                      Save & Connect
-                    </button>
-                    <button 
-                      onClick={async () => {
-                        if (window.electronAPI && window.electronAPI.syncMongoDB) {
-                          const result = await window.electronAPI.syncMongoDB();
-                          if (result.success) {
-                            // Reload activities after sync
-                            const acts = await window.electronAPI.getActivities();
-                            setActivities(acts);
-                            alert(`Synced! ${result.count} activities total.`);
-                          } else {
-                            alert('Sync failed: ' + (result.error || 'Unknown error'));
-                          }
-                        }
-                      }} 
-                      className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded"
-                    >
-                      🔄 Sync Now
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    ✅ Bidirectional sync: Changes sync to both local file and MongoDB.<br/>
-                    ✅ Deletions also sync to MongoDB.
-                  </p>
-                  
-                  <div className="mt-6 pt-4 border-t border-gray-700">
-                    <h4 className="text-lg font-semibold text-red-400 mb-3">⚠️ Danger Zone</h4>
-                    <button 
-                      onClick={async () => {
-                        if (confirm('Are you sure you want to delete ALL activities? This will clear both local storage and MongoDB. This cannot be undone!')) {
-                          if (confirm('FINAL WARNING: This will permanently delete all your tracked data. Continue?')) {
-                            if (window.electronAPI && window.electronAPI.clearAllData) {
-                              const result = await window.electronAPI.clearAllData();
-                              if (result.success) {
-                                setActivities([]);
-                                alert('All data cleared successfully!');
-                              } else {
-                                alert('Error clearing data: ' + (result.error || 'Unknown error'));
-                              }
-                            }
-                          }
-                        }
-                      }} 
-                      className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded flex items-center gap-2"
-                    >
-                      <TrashIcon /> Clear All Data
-                    </button>
-                    <p className="text-xs text-gray-500 mt-2">Deletes all activities from local file and MongoDB.</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-2 mb-6 border-b border-gray-700">
-              <button onClick={() => setTab('calendar')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'calendar' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
-                <CalendarIcon /> Timeline
-              </button>
-              <button onClick={() => setTab('pomo')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'pomo' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
-                <ClockIcon /> Pomodoro
-              </button>
-              <button onClick={() => setTab('stats')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'stats' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
-                <ChartIcon /> Stats
-              </button>
-            </div>
-
-            {tab === 'calendar' && (
-              <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex justify-between mb-4">
-                  <div className="flex gap-2">
-                    <button onClick={() => { const d = new Date(date); d.setDate(d.getDate() - 1); setDate(d); }} className="bg-gray-700 px-4 py-2 rounded">← Prev</button>
-                    <button onClick={() => setDate(new Date())} className="bg-pink-600 px-4 py-2 rounded">Today</button>
-                    <button onClick={() => { const d = new Date(date); d.setDate(d.getDate() + 1); setDate(d); }} className="bg-gray-700 px-4 py-2 rounded">Next →</button>
-                  </div>
-                  <h2 className="text-xl font-bold">{date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</h2>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {/* Activities List */}
-                  <div className="bg-gray-900 rounded p-4 overflow-y-auto" style={{maxHeight: '600px'}}>
-                    <h3 className="font-bold mb-3">Today's Activities</h3>
-                    {today().length === 0 ? (
-                      <div className="text-gray-500 text-sm text-center py-8">No activities</div>
-                    ) : (
-                      today().map(a => (
-                        <div key={a.id} onClick={() => { setEditing(a); setShowModal(true); }} className={`${getColor(a.type)} p-3 rounded mb-2 cursor-pointer hover:opacity-80`}>
-                          <div className="flex justify-between mb-1">
-                            <div className="font-medium text-sm">{a.name}</div>
-                            <div className="text-xs opacity-75">{fmt(a.duration)}</div>
-                          </div>
-                          <div className="text-xs opacity-75">
-                            {new Date(a.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(a.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Integrated Timeline with Drag + Red Block Popups */}
-                  <div className="col-span-2">
-                    <IntegratedTimeline activities={activities} date={date} setEditing={setEditing} setShowModal={setShowModal} addActivity={addActivity} setActivities={setActivities} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {tab === 'pomo' && (
-              <div className="bg-gray-800 rounded-lg p-8">
-                <div className="max-w-md mx-auto text-center">
-                  <div className="text-gray-400 mb-2">{pomoMode === 'focus' ? 'Focus Time' : 'Break Time'}</div>
-                  <div className="text-6xl font-mono font-bold mb-4">{fmtPomo(pomoTime)}</div>
-                  
-                  {/* Running Session Indicator */}
-                  {pomoRunning && pomoMode === 'focus' && (
-                    <div className={`mb-4 px-4 py-2 rounded-lg inline-block ${
-                      pomoType === 'productive' ? 'bg-green-600' : 
-                      pomoType === 'unproductive' ? 'bg-red-600' : 'bg-gray-600'
-                    }`}>
-                      <span className="text-sm font-medium">
-                        Running: {pomoType === 'productive' ? '✅ Productive' : 
-                                 pomoType === 'unproductive' ? '❌ Unproductive' : '⚪ Neutral'} Session
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Pomodoro Classification */}
-                  {pomoMode === 'focus' && (
-                    <div className="mb-6 p-4 bg-gray-900 rounded-lg">
-                      <label className="block text-sm text-gray-400 mb-3">Session Title:</label>
-                      <input 
-                        type="text" 
-                        value={pomoTitle} 
-                        onChange={(e) => setPomoTitle(e.target.value)}
-                        placeholder="What are you working on?"
-                        disabled={pomoRunning}
-                        className="w-full bg-gray-700 text-white rounded px-3 py-2 mb-4 disabled:opacity-50"
-                      />
-                      
-                      <label className="block text-sm text-gray-400 mb-3">This session will be classified as:</label>
-                      <div className="flex gap-3 justify-center">
-                        <button 
-                          onClick={() => setPomoType('productive')} 
-                          disabled={pomoRunning}
-                          className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
-                            pomoType === 'productive' 
-                              ? 'bg-green-600 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          ✅ Productive
-                        </button>
-                        <button 
-                          onClick={() => setPomoType('unproductive')} 
-                          disabled={pomoRunning}
-                          className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
-                            pomoType === 'unproductive' 
-                              ? 'bg-red-600 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          ❌ Unproductive
-                        </button>
-                        <button 
-                          onClick={() => setPomoType('neutral')} 
-                          disabled={pomoRunning}
-                          className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
-                            pomoType === 'neutral' 
-                              ? 'bg-gray-600 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          ⚪ Neutral
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-center gap-4 mb-8">
-                    {!pomoRunning ? (
-                      <button onClick={() => { 
-                        setPomoRunning(true); 
-                        const startTime = new Date();
-                        setPomoStart(startTime);
-                        
-                        // Just save simple state - don't create activity yet
-                        const pomoState = {
-                          time: pomoTime,
-                          mode: pomoMode,
-                          running: true,
-                          start: startTime.toISOString(),
-                          type: pomoType,
-                          title: pomoTitle
-                        };
-                        localStorage.setItem('pomoState', JSON.stringify(pomoState));
-                        sessionStorage.setItem('pomoState_backup', JSON.stringify(pomoState));
-                      }} className="bg-pink-600 px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-pink-700 transition-colors">
-                        <PlayIcon /> Start {pomoMode === 'focus' ? pomoType : 'Break'}
-                      </button>
-                    ) : (
-                      <>
-                        <button onClick={() => setPomoRunning(false)} className="bg-yellow-600 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-yellow-700 transition-colors">
-                          <PauseIcon /> Pause
-                        </button>
-                        <button onClick={pomoStop} className="bg-red-600 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-red-700 transition-colors">
-                          <SquareIcon /> Stop & Save as {pomoType}
-                        </button>
-                      </>
-                    )}
-                    <button onClick={() => { 
-                      setPomoRunning(false); 
-                      setPomoStart(null); 
-                      setPomoMode('focus'); 
-                      setPomoTime(focusMin * 60); // Use custom focus time, not default
-                      
-                      // Clear Pomodoro state
-                      localStorage.removeItem('pomoState');
-                      sessionStorage.removeItem('pomoState_backup');
-                    }} className="bg-gray-700 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-gray-600 transition-colors">
-                      <XIcon /> Reset
-                    </button>
-                  </div>
-
-                  <div className="border-t border-gray-700 pt-6 space-y-4">
-                    <div className="flex justify-between">
-                      <label>Focus (min)</label>
-                      <input type="number" value={focusMin} onChange={(e) => { 
-                        const newFocusMin = Number(e.target.value);
-                        setFocusMin(newFocusMin); 
-                        // Save as default
-                        localStorage.setItem('defaultFocusMin', String(newFocusMin));
-                        if (pomoMode === 'focus' && !pomoRunning) {
-                          setPomoTime(newFocusMin * 60);
-                        }
-                      }} className="bg-gray-700 rounded px-3 py-1 w-20 text-center" disabled={pomoRunning} />
-                    </div>
-                    <div className="flex justify-between">
-                      <label>Break (min)</label>
-                      <input type="number" value={breakMin} onChange={(e) => { 
-                        const newBreakMin = Number(e.target.value);
-                        setBreakMin(newBreakMin); 
-                        // Save as default
-                        localStorage.setItem('defaultBreakMin', String(newBreakMin));
-                        if (pomoMode === 'break' && !pomoRunning) {
-                          setPomoTime(newBreakMin * 60);
-                        }
-                      }} className="bg-gray-700 rounded px-3 py-1 w-20 text-center" disabled={pomoRunning} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {tab === 'stats' && (
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h2 className="text-xl font-bold mb-6 text-center">Activity Analytics</h2>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <PieChart 
-                    data={(() => {
-                      // Get today's date in multiple formats for comparison
-                      const today = new Date();
-                      const todayStr = today.toLocaleDateString();
-                      const todayDateStr = today.toDateString();
-                      
-                      // Filter activities for today - check multiple date formats
-                      const dayActivities = activities.filter(a => {
-                        // Check by startTime first (most reliable)
-                        if (a.startTime) {
-                          const actDate = new Date(a.startTime);
-                          return actDate.toDateString() === todayDateStr;
-                        }
-                        // Fallback to date field
-                        if (a.date) {
-                          return a.date === todayStr;
-                        }
-                        return false;
-                      });
-                      
-                      console.log('Today activities:', dayActivities.length, 'from', activities.length, 'todayStr:', todayStr);
-                      
-                      // Group by type
-                      const grouped = { productive: 0, unproductive: 0, neutral: 0, untracked: 0 };
-                      dayActivities.forEach(a => {
-                        let type = a.type;
-                        if (!type || type === 'unclassified') {
-                          type = 'untracked';
-                        }
-                        if (grouped[type] !== undefined) {
-                          grouped[type] += (a.duration || 0);
-                        } else {
-                          grouped['untracked'] += (a.duration || 0);
-                        }
-                      });
-                      
-                      console.log('Grouped:', grouped);
-                      
-                      return [
-                        { label: 'Productive', value: grouped.productive || 0 },
-                        { label: 'Unproductive', value: grouped.unproductive || 0 },
-                        { label: 'Neutral', value: grouped.neutral || 0 },
-                        { label: 'Untracked', value: grouped.untracked || 0 }
-                      ].filter(d => d.value > 0);
-                    })()} 
-                    title="Today's Activity" 
-                  />
-                  
-                  <PieChart 
-                    data={(() => {
-                      const now = new Date();
-                      const weekStart = new Date(now);
-                      weekStart.setDate(weekStart.getDate() - 7);
-                      weekStart.setHours(0, 0, 0, 0);
-                      
-                      const weekActivities = activities.filter(a => {
-                        if (!a.startTime) return false;
-                        const actDate = new Date(a.startTime);
-                        return actDate >= weekStart;
-                      });
-                      
-                      // Group by type - treat both 'unclassified' and undefined as untracked
-                      const grouped = { productive: 0, unproductive: 0, neutral: 0, untracked: 0 };
-                      weekActivities.forEach(a => {
-                        let type = a.type;
-                        if (!type || type === 'unclassified' || type === 'undefined') {
-                          type = 'untracked';
-                        }
-                        if (grouped[type] !== undefined) {
-                          grouped[type] += (a.duration || 0);
-                        } else {
-                          grouped['untracked'] += (a.duration || 0);
-                        }
-                      });
-                      
-                      // Return all categories that have time
-                      return [
-                        { label: 'Productive', value: grouped.productive || 0 },
-                        { label: 'Unproductive', value: grouped.unproductive || 0 },
-                        { label: 'Neutral', value: grouped.neutral || 0 },
-                        { label: 'Untracked', value: grouped.untracked || 0 }
-                      ].filter(d => d.value > 0);
-                    })()} 
-                    title="This Week's Activity" 
-                  />
-                </div>
-              </div>
-            )}
-
-            {showModal && editing && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-                  <div className="flex justify-between mb-4">
-                    <h3 className="text-xl font-bold">Edit Activity</h3>
-                    <button onClick={() => setShowModal(false)}><XIcon /></button>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Name</label>
-                      <input type="text" value={editing.name} onChange={(e) => setEditing({...editing, name: e.target.value})} className="w-full bg-gray-700 rounded px-4 py-2" />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Type</label>
-                      <select value={editing.type} onChange={(e) => setEditing({...editing, type: e.target.value})} className="w-full bg-gray-700 rounded px-4 py-2">
-                        <option value="productive">Productive (Green)</option>
-                        <option value="unproductive">Unproductive (Orange)</option>
-                        <option value="neutral">Neutral (Gray)</option>
-                      </select>
-                    </div>
-
-                    <div className="text-sm text-gray-400">Duration: {fmt(editing.duration)}</div>
-
-                    <div className="flex gap-3 pt-4">
-                      <button onClick={() => update(editing)} className="flex-1 bg-pink-600 px-4 py-2 rounded flex items-center justify-center gap-2">
-                        <CheckIcon /> Save
-                      </button>
-                      <button onClick={() => del(editing.id)} className="bg-red-600 px-4 py-2 rounded flex items-center gap-2">
-                        <TrashIcon /> Delete
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+      {/* Custom Title Bar */}
+      <div className="bg-gray-950 h-10 flex items-center justify-between px-4 select-none" style={{WebkitAppRegion: 'drag'}}>
+        <div className="flex items-center gap-2">
+          <span className="text-pink-500 font-bold">⏱️</span>
+          <span className="text-sm font-medium">Productivity Tracker</span>
+        </div>
+        <div className="flex" style={{WebkitAppRegion: 'no-drag'}}>
+          <button onClick={() => window.electronAPI?.minimizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+          </button>
+          <button onClick={() => window.electronAPI?.maximizeWindow()} className="w-10 h-10 hover:bg-gray-700 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>
+          </button>
+          <button onClick={() => window.electronAPI?.closeWindow()} className="w-10 h-10 hover:bg-red-600 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" strokeWidth="1.5"/></svg>
+          </button>
+        </div>
+      </div>
+      
+      <div className="flex-1 p-4 overflow-auto">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">Productivity Tracker</h1>
+          <div className="flex gap-2">
+            <button onClick={() => setShowGCal(!showGCal)} className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded hover:bg-gray-700">
+              <CalendarSyncIcon /> {gcalAuthorized ? '✓' : ''} Google Calendar
+            </button>
+            <button onClick={() => setShowMongo(!showMongo)} className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded hover:bg-gray-700">
+              <DatabaseIcon /> MongoDB
+            </button>
           </div>
         </div>
-      );
-    };
 
-    ReactDOM.render(<App />, document.getElementById('root'));
-  </script>
+        {showGCal && (
+          <div className="mb-6 bg-gray-800 rounded-lg p-6">
+            <h3 className="text-xl font-bold mb-4">Google Calendar Integration</h3>
+            
+            {!gcalAuthorized ? (
+              <div className="space-y-4">
+                <p className="text-gray-300 text-sm">
+                  🔥 One-click sign-in with Firebase - no code needed!
+                </p>
+                
+                <button 
+                  onClick={connectGoogleCalendar}
+                  className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded flex items-center gap-2"
+                >
+                  🔗 Sign in with Google
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-green-400">
+                  <CheckIcon /> Connected to Google Calendar - Auto-sync enabled (every 5 min)
+                </div>
+<p className="text-sm text-gray-400">
+                  📅 Calendar events are automatically imported as <span className="text-gray-300 font-bold">neutral activities</span> and appear in your timeline.<br/>
+                  🔄 Sync happens every 5 minutes in the background.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => syncToGoogleCalendar()}
+                    disabled={gcalSyncing}
+                    className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded disabled:opacity-50"
+                  >
+                    {gcalSyncing ? '⏳ Syncing...' : '📤 Push Activities to Calendar'}
+                  </button>
+                  
+                  <button 
+                    onClick={() => {
+                      const today = new Date().toLocaleDateString();
+                      const todayActivities = activities.filter(a => {
+                        const actDate = new Date(a.startTime).toLocaleDateString();
+                        return actDate === today && a.type !== 'untracked' && a.type !== 'unclassified' && a.endTime;
+                      });
+                      syncToGoogleCalendar(todayActivities);
+                    }}
+                    disabled={gcalSyncing}
+                    className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded disabled:opacity-50"
+                  >
+                    {gcalSyncing ? '⏳ Syncing...' : '📤 Push Today Only'}
+                  </button>
+                  
+                  <button 
+                    onClick={disconnectGoogleCalendar}
+                    className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded"
+                  >
+                    🔌 Disconnect
+                  </button>
+                </div>
+                
+                <p className="text-xs text-gray-400 mt-2">
+                  ✅ Calendar events → Imported as neutral (gray) activities<br/>
+                  ✅ Your tracked activities → Push to Calendar with colors (Green=Productive, Orange=Unproductive, Gray=Neutral)
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {showMongo && (
+          <div className="mb-6 bg-gray-800 rounded-lg p-6">
+            <h3 className="text-xl font-bold mb-4">MongoDB Configuration</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">MongoDB Connection String</label>
+                <input type="text" value={mongoUri} onChange={(e) => setMongoUri(e.target.value)} placeholder="mongodb+srv://..." className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Database</label>
+                  <input type="text" value={mongoDb} onChange={(e) => setMongoDb(e.target.value)} className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Collection</label>
+                  <input type="text" value={mongoColl} onChange={(e) => setMongoColl(e.target.value)} className="w-full bg-gray-700 rounded px-4 py-2 text-sm" />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={saveMongo} className="bg-pink-600 hover:bg-pink-700 px-6 py-2 rounded">
+                  Save & Connect
+                </button>
+                <button 
+                  onClick={async () => {
+                    if (window.electronAPI && window.electronAPI.syncMongoDB) {
+                      const result = await window.electronAPI.syncMongoDB();
+                      if (result.success) {
+                        // Reload activities after sync
+                        const acts = await window.electronAPI.getActivities();
+                        setActivities(acts);
+                        alert(`Synced! ${result.count} activities total.`);
+                      } else {
+                        alert('Sync failed: ' + (result.error || 'Unknown error'));
+                      }
+                    }
+                  }} 
+                  className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded"
+                >
+                  🔄 Sync Now
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                ✅ Bidirectional sync: Google Calendar imports sync to both local file and MongoDB.<br/>
+                ✅ Deletions also sync to MongoDB.
+              </p>
+              
+              <div className="mt-6 pt-4 border-t border-gray-700">
+                <h4 className="text-lg font-semibold text-red-400 mb-3">⚠️ Danger Zone</h4>
+                <button 
+                  onClick={async () => {
+                    if (confirm('Are you sure you want to delete ALL activities? This will clear both local storage and MongoDB. This cannot be undone!')) {
+                      if (confirm('FINAL WARNING: This will permanently delete all your tracked data. Continue?')) {
+                        if (window.electronAPI && window.electronAPI.clearAllData) {
+                          const result = await window.electronAPI.clearAllData();
+                          if (result.success) {
+                            setActivities([]);
+                            alert('All data cleared successfully!');
+                          } else {
+                            alert('Error clearing data: ' + (result.error || 'Unknown error'));
+                          }
+                        }
+                      }
+                    }
+                  }} 
+                  className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded flex items-center gap-2"
+                >
+                  <TrashIcon /> Clear All Data
+                </button>
+                <p className="text-xs text-gray-500 mt-2">Deletes all activities from local file and MongoDB.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-6 border-b border-gray-700">
+          <button onClick={() => setTab('calendar')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'calendar' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
+            <CalendarIcon /> Timeline
+          </button>
+          <button onClick={() => setTab('pomo')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'pomo' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
+            <ClockIcon /> Pomodoro
+          </button>
+          <button onClick={() => setTab('stats')} className={`px-4 py-2 flex items-center gap-2 ${tab === 'stats' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-gray-400'}`}>
+            <ChartIcon /> Stats
+          </button>
+        </div>
+
+        {tab === 'calendar' && (
+          <div className="bg-gray-800 rounded-lg p-4">
+            <div className="flex justify-between mb-4">
+              <div className="flex gap-2">
+                <button onClick={() => { const d = new Date(date); d.setDate(d.getDate() - 1); setDate(d); }} className="bg-gray-700 px-4 py-2 rounded">← Prev</button>
+                <button onClick={() => setDate(new Date())} className="bg-pink-600 px-4 py-2 rounded">Today</button>
+                <button onClick={() => { const d = new Date(date); d.setDate(d.getDate() + 1); setDate(d); }} className="bg-gray-700 px-4 py-2 rounded">Next →</button>
+              </div>
+              <h2 className="text-xl font-bold">{date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Activities List */}
+              <div className="bg-gray-900 rounded p-4 overflow-y-auto" style={{maxHeight: '600px'}}>
+                <h3 className="font-bold mb-3">Today's Activities</h3>
+                {today().length === 0 ? (
+                  <div className="text-gray-500 text-sm text-center py-8">No activities</div>
+                ) : (
+                  today().map(a => (
+                    <div key={a.id} onClick={() => { setEditing(a); setShowModal(true); }} className={`${getColor(a.type)} p-3 rounded mb-2 cursor-pointer hover:opacity-80`}>
+                      <div className="flex justify-between mb-1">
+                        <div className="font-medium text-sm flex items-center gap-1">
+                          {a.name}
+                          {a.source === 'google-calendar' && <span title="From Google Calendar">📅</span>}
+                        </div>
+                        <div className="text-xs opacity-75">{fmt(a.duration)}</div>
+                      </div>
+                      <div className="text-xs opacity-75">
+                        {new Date(a.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - {new Date(a.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Integrated Timeline with Drag + Red Block Popups */}
+              <div className="col-span-2">
+                <IntegratedTimeline activities={activities} date={date} setEditing={setEditing} setShowModal={setShowModal} addActivity={addActivity} setActivities={setActivities} currentTime={currentTime} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'pomo' && (
+          <div className="bg-gray-800 rounded-lg p-8">
+            <div className="max-w-md mx-auto text-center">
+              <div className="text-gray-400 mb-2">{pomoMode === 'focus' ? 'Focus Time' : 'Break Time'}</div>
+              <div className="text-6xl font-mono font-bold mb-4">{fmtPomo(pomoTime)}</div>
+              
+              {/* Running Session Indicator */}
+              {pomoRunning && pomoMode === 'focus' && (
+                <div className={`mb-4 px-4 py-2 rounded-lg inline-block ${
+                  pomoType === 'productive' ? 'bg-green-600' : 
+                  pomoType === 'unproductive' ? 'bg-red-600' : 'bg-gray-600'
+                }`}>
+                  <span className="text-sm font-medium">
+                    Running: {pomoType === 'productive' ? '✅ Productive' : 
+                             pomoType === 'unproductive' ? '❌ Unproductive' : '⚪ Neutral'} Session
+                  </span>
+                </div>
+              )}
+
+              {/* Pomodoro Classification */}
+              {pomoMode === 'focus' && (
+                <div className="mb-6 p-4 bg-gray-900 rounded-lg">
+                  <label className="block text-sm text-gray-400 mb-3">Session Title:</label>
+                  <input 
+                    type="text" 
+                    value={pomoTitle} 
+                    onChange={(e) => setPomoTitle(e.target.value)}
+                    placeholder="What are you working on?"
+                    disabled={pomoRunning}
+                    className="w-full bg-gray-700 text-white rounded px-3 py-2 mb-4 disabled:opacity-50"
+                  />
+                  
+                  <label className="block text-sm text-gray-400 mb-3">This session will be classified as:</label>
+                  <div className="flex gap-3 justify-center">
+                    <button 
+                      onClick={() => setPomoType('productive')} 
+                      disabled={pomoRunning}
+                      className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
+                        pomoType === 'productive' 
+                          ? 'bg-green-600 text-white' 
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      ✅ Productive
+                    </button>
+                    <button 
+                      onClick={() => setPomoType('unproductive')} 
+                      disabled={pomoRunning}
+                      className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
+                        pomoType === 'unproductive' 
+                          ? 'bg-red-600 text-white' 
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      ❌ Unproductive
+                    </button>
+                    <button 
+                      onClick={() => setPomoType('neutral')} 
+                      disabled={pomoRunning}
+                      className={`px-4 py-2 rounded flex items-center gap-2 transition-colors ${
+                        pomoType === 'neutral' 
+                          ? 'bg-gray-600 text-white' 
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      } ${pomoRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      ⚪ Neutral
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-center gap-4 mb-8">
+                {!pomoRunning ? (
+                  <button onClick={() => { 
+                    setPomoRunning(true); 
+                    const startTime = new Date();
+                    setPomoStart(startTime);
+                    
+                    // Just save simple state - don't create activity yet
+                    const pomoState = {
+                      time: pomoTime,
+                      mode: pomoMode,
+                      running: true,
+                      start: startTime.toISOString(),
+                      type: pomoType,
+                      title: pomoTitle
+                    };
+                    localStorage.setItem('pomoState', JSON.stringify(pomoState));
+                    sessionStorage.setItem('pomoState_backup', JSON.stringify(pomoState));
+                  }} className="bg-pink-600 px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-pink-700 transition-colors">
+                    <PlayIcon /> Start {pomoMode === 'focus' ? pomoType : 'Break'}
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => setPomoRunning(false)} className="bg-yellow-600 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-yellow-700 transition-colors">
+                      <PauseIcon /> Pause
+                    </button>
+                    <button onClick={pomoStop} className="bg-red-600 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-red-700 transition-colors">
+                      <SquareIcon /> Stop & Save as {pomoType}
+                    </button>
+                  </>
+                )}
+                <button onClick={() => { 
+                  setPomoRunning(false); 
+                  setPomoStart(null); 
+                  setPomoMode('focus'); 
+                  setPomoTime(focusMin * 60); // Use custom focus time, not default
+                  
+                  // Clear Pomodoro state
+                  localStorage.removeItem('pomoState');
+                  sessionStorage.removeItem('pomoState_backup');
+                }} className="bg-gray-700 px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-gray-600 transition-colors">
+                  <XIcon /> Reset
+                </button>
+              </div>
+
+              <div className="border-t border-gray-700 pt-6 space-y-4">
+                <div className="flex justify-between">
+                  <label>Focus (min)</label>
+                  <input type="number" value={focusMin} onChange={(e) => { 
+                    const newFocusMin = Number(e.target.value);
+                    setFocusMin(newFocusMin); 
+                    // Save as default
+                    localStorage.setItem('defaultFocusMin', String(newFocusMin));
+                    if (pomoMode === 'focus' && !pomoRunning) {
+                      setPomoTime(newFocusMin * 60);
+                    }
+                  }} className="bg-gray-700 rounded px-3 py-1 w-20 text-center" disabled={pomoRunning} />
+                </div>
+                <div className="flex justify-between">
+                  <label>Break (min)</label>
+                  <input type="number" value={breakMin} onChange={(e) => { 
+                    const newBreakMin = Number(e.target.value);
+                    setBreakMin(newBreakMin); 
+                    // Save as default
+                    localStorage.setItem('defaultBreakMin', String(newBreakMin));
+                    if (pomoMode === 'break' && !pomoRunning) {
+                      setPomoTime(newBreakMin * 60);
+                    }
+                  }} className="bg-gray-700 rounded px-3 py-1 w-20 text-center" disabled={pomoRunning} />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'stats' && (
+          <div className="bg-gray-800 rounded-lg p-4">
+            <h2 className="text-xl font-bold mb-6 text-center">Activity Analytics</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <PieChart 
+                data={(() => {
+                  // Get today's date in multiple formats for comparison
+                  const today = new Date();
+                  const todayStr = today.toLocaleDateString();
+                  const todayDateStr = today.toDateString();
+                  
+                  // Filter activities for today - check multiple date formats
+                  const dayActivities = activities.filter(a => {
+                    // Check by startTime first (most reliable)
+                    if (a.startTime) {
+                      const actDate = new Date(a.startTime);
+                      return actDate.toDateString() === todayDateStr;
+                    }
+                    // Fallback to date field
+                    if (a.date) {
+                      return a.date === todayStr;
+                    }
+                    return false;
+                  });
+                  
+                  console.log('Today activities:', dayActivities.length, 'from', activities.length, 'todayStr:', todayStr);
+                  
+                  // Group by type
+                  const grouped = { productive: 0, unproductive: 0, neutral: 0, untracked: 0 };
+                  dayActivities.forEach(a => {
+                    let type = a.type;
+                    if (!type || type === 'unclassified') {
+                      type = 'untracked';
+                    }
+                    if (grouped[type] !== undefined) {
+                      grouped[type] += (a.duration || 0);
+                    } else {
+                      grouped['untracked'] += (a.duration || 0);
+                    }
+                  });
+                  
+                  console.log('Grouped:', grouped);
+                  
+                  return [
+                    { label: 'Productive', value: grouped.productive || 0 },
+                    { label: 'Unproductive', value: grouped.unproductive || 0 },
+                    { label: 'Neutral', value: grouped.neutral || 0 },
+                    { label: 'Untracked', value: grouped.untracked || 0 }
+                  ].filter(d => d.value > 0);
+                })()} 
+                title="Today's Activity" 
+              />
+              
+              <PieChart 
+                data={(() => {
+                  const now = new Date();
+                  const weekStart = new Date(now);
+                  weekStart.setDate(weekStart.getDate() - 7);
+                  weekStart.setHours(0, 0, 0, 0);
+                  
+                  const weekActivities = activities.filter(a => {
+                    if (!a.startTime) return false;
+                    const actDate = new Date(a.startTime);
+                    return actDate >= weekStart;
+                  });
+                  
+                  // Group by type - treat both 'unclassified' and undefined as untracked
+                  const grouped = { productive: 0, unproductive: 0, neutral: 0, untracked: 0 };
+                  weekActivities.forEach(a => {
+                    let type = a.type;
+                    if (!type || type === 'unclassified' || type === 'undefined') {
+                      type = 'untracked';
+                    }
+                    if (grouped[type] !== undefined) {
+                      grouped[type] += (a.duration || 0);
+                    } else {
+                      grouped['untracked'] += (a.duration || 0);
+                    }
+                  });
+                  
+                  // Return all categories that have time
+                  return [
+                    { label: 'Productive', value: grouped.productive || 0 },
+                    { label: 'Unproductive', value: grouped.unproductive || 0 },
+                    { label: 'Neutral', value: grouped.neutral || 0 },
+                    { label: 'Untracked', value: grouped.untracked || 0 }
+                  ].filter(d => d.value > 0);
+                })()} 
+                title="This Week's Activity" 
+              />
+            </div>
+          </div>
+        )}
+
+        {showModal && editing && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <div className="flex justify-between mb-4">
+                <h3 className="text-xl font-bold">
+                  {editing.source === 'google-calendar' ? 'Edit Calendar Event' : 'Edit Activity'}
+                </h3>
+                <button onClick={() => setShowModal(false)}><XIcon /></button>
+              </div>
+              
+              {editing.source === 'google-calendar' && (
+                <p className="text-blue-400 text-sm mb-3">📅 Originally from Google Calendar</p>
+              )}
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Name</label>
+                  <input type="text" value={editing.name} onChange={(e) => setEditing({...editing, name: e.target.value})} className="w-full bg-gray-700 rounded px-4 py-2" />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Type</label>
+                  <select value={editing.type} onChange={(e) => setEditing({...editing, type: e.target.value})} className="w-full bg-gray-700 rounded px-4 py-2">
+                    <option value="productive">Productive (Green)</option>
+                    <option value="unproductive">Unproductive (Orange)</option>
+                    <option value="neutral">Neutral (Gray)</option>
+                  </select>
+                </div>
+
+                <div className="text-sm text-gray-400">Duration: {fmt(editing.duration)}</div>
+
+                <div className="flex gap-3 pt-4">
+                  <button onClick={() => update(editing)} className="flex-1 bg-pink-600 px-4 py-2 rounded flex items-center justify-center gap-2">
+                    <CheckIcon /> Save
+                  </button>
+                  <button onClick={() => del(editing.id)} className="bg-red-600 px-4 py-2 rounded flex items-center gap-2">
+                    <TrashIcon /> Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
 </body>
 </html>

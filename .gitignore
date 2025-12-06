@@ -1,3 +1,9 @@
 node_modules/
 activities-data.json
 dist
+# User data directory (stored in OS-specific location, not in project)
+userData/
+# Google Calendar credentials - NEVER commit these
+credentials.json
+google-token.json
+firebase-config.js

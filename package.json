@@ -39,6 +39,9 @@
   },
   "dependencies": {
     "active-win": "^8.0.0",
+    "firebase": "^12.6.0",
+    "firebase-admin": "^13.6.0",
+    "googleapis": "^167.0.0",
     "mongodb": "^6.21.0"
   },
   "devDependencies": {

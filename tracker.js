@@ -11,8 +11,13 @@ class ScreenTracker {
     this.checkInterval = 5000; // Check every 5 seconds
     this.intervalId = null;
     
-    // Local file storage
-    this.dataFile = path.join(__dirname, 'activities-data.json');
+    // Local file storage - use app data directory instead of __dirname
+    // This ensures data persists even in compiled binaries
+    const { app } = require('electron');
+    const userDataPath = app.getPath('userData');
+    this.dataFile = path.join(userDataPath, 'activities-data.json');
+    
+    console.log('📁 Data file location:', this.dataFile);
     
     // MongoDB
     this.mongoClient = null;
@@ -39,11 +44,19 @@ class ScreenTracker {
 
   // Method to update activities from renderer (for deletions/edits)
   saveActivities(newActivities) {
-    this.activities = newActivities;
+    // Completely replace activities array with new one from UI
+    this.activities = [...newActivities];
+    
+    // Save to file immediately
     this.saveToFile();
+    
     // Also sync all changes to MongoDB (including deletions)
-    this.syncToMongoDB(newActivities);
-    this.syncDeletionsToMongoDB(newActivities.map(a => a.id));
+    if (this.db) {
+      this.syncToMongoDB(newActivities);
+      this.syncDeletionsToMongoDB(newActivities.map(a => a.id));
+    }
+    
+    console.log(`🔄 Activities updated from UI: ${this.activities.length} total`);
   }
 
   async syncToMongoDB(activities) {
@@ -112,6 +125,12 @@ class ScreenTracker {
 
   saveToFile() {
     try {
+      // Ensure directory exists
+      const dir = path.dirname(this.dataFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
       // Keep only last 30 days of data
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -156,9 +175,6 @@ class ScreenTracker {
   async start() {
     console.log('🚀 Screen tracker started - monitoring active windows...');
     this.intervalId = setInterval(() => this.checkActiveWindow(), this.checkInterval);
-    
-    // Don't auto-save - let the UI handle saves to prevent overwriting user changes
-    // Only save when a new activity is completed
   }
 
   async stop() {
@@ -241,11 +257,19 @@ class ScreenTracker {
       
       const saved = {...this.currentActivity};
       
-      // Reload from file first to get latest state (including UI deletions)
-      this.loadFromFile();
+      // DON'T reload from file - trust our in-memory state
+      // This prevents overwriting UI deletions and Google Calendar imports
       
-      // Add new activity to the reloaded list
-      this.activities.unshift(saved);
+      // Check if this activity already exists (by ID)
+      const existingIndex = this.activities.findIndex(a => a.id === saved.id);
+      
+      if (existingIndex >= 0) {
+        // Update existing activity
+        this.activities[existingIndex] = saved;
+      } else {
+        // Add new activity
+        this.activities.unshift(saved);
+      }
       
       // Keep only last 1000 activities in memory
       if (this.activities.length > 1000) {
@@ -254,7 +278,9 @@ class ScreenTracker {
       
       // Save to both file and MongoDB
       this.saveToFile();
-      this.saveToMongoDB(saved);
+      if (this.db) {
+        this.saveToMongoDB(saved);
+      }
       
       console.log(`💾 Saved: ${saved.name} - ${saved.duration}s (${this.formatTime(saved.duration)})`);
     }
@@ -265,8 +291,22 @@ class ScreenTracker {
     if (!this.db) return;
     
     try {
-      await this.db.collection('activities').insertOne(activity);
-      console.log(`☁️ Synced to MongoDB: ${activity.name}`);
+      // Check if activity already exists (for Google Calendar imports, manual entries, etc.)
+      const existing = await this.db.collection('activities').findOne({ id: activity.id });
+      
+      if (existing) {
+        // Update existing
+        const { _id, ...activityWithoutId } = activity;
+        await this.db.collection('activities').updateOne(
+          { id: activity.id },
+          { $set: activityWithoutId }
+        );
+        console.log(`☁️ Updated in MongoDB: ${activity.name}`);
+      } else {
+        // Insert new
+        await this.db.collection('activities').insertOne(activity);
+        console.log(`☁️ Synced to MongoDB: ${activity.name}`);
+      }
     } catch (error) {
       console.error('❌ Error saving to MongoDB:', error.message);
     }
@@ -308,10 +348,23 @@ class ScreenTracker {
   }
 
   addManualActivity(activity) {
-    this.activities.unshift(activity);
+    // Check if activity already exists (prevent duplicates from Google Calendar)
+    const existingIndex = this.activities.findIndex(a => a.id === activity.id);
+    
+    if (existingIndex >= 0) {
+      // Update existing
+      this.activities[existingIndex] = activity;
+      console.log(`✏️ Updated activity: ${activity.name}`);
+    } else {
+      // Add new
+      this.activities.unshift(activity);
+      console.log(`✏️ Manual activity added: ${activity.name}`);
+    }
+    
     this.saveToFile();
-    this.saveToMongoDB(activity);
-    console.log(`✏️ Manual activity added: ${activity.name}`);
+    if (this.db) {
+      this.saveToMongoDB(activity);
+    }
   }
 
   getActivities() {
