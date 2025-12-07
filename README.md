@@ -89,7 +89,3 @@ The built app will work on any computer without requiring Node.js or npm install
 **App won't start**: Check that port 8765 is not in use by another application
 
 **Google Calendar not syncing**: Verify Firebase authentication is working first
-
-## License
-
-MIT
